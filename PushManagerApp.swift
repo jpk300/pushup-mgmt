@@ -261,47 +261,29 @@ struct PushManagerView: View {
     @EnvironmentObject private var store: PushupStore
     @State private var logCount: String = ""
     @State private var rangeOption: RangeOption = .weekly
-    @State private var showingNotificationAlert = false
-    @State private var newReminderTime: Date = PushupStore.defaultReminderTime()
     @State private var editingEntry: PushupEntry?
     @State private var editCount: String = ""
     @FocusState private var isLogFieldFocused: Bool
 
     var body: some View {
-        TabView {
-            NavigationView {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        heroSection
-                        logSection
-                        insightsSection
-                    }
-                    .padding()
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    heroSection
+                    logSection
+                    insightsSection
                 }
-                .navigationTitle("Jason's Pushup Tracker")
+                .padding()
             }
-            .tabItem {
-                Label("Track", systemImage: "figure.strengthtraining.traditional")
-            }
-
-            NavigationView {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        targetSection
-                        remindersSection
+            .navigationTitle("Jason's Pushup Tracker")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink("Settings") {
+                        AdminView()
+                            .environmentObject(store)
                     }
-                    .padding()
                 }
-                .navigationTitle("Admin")
             }
-            .tabItem {
-                Label("Admin", systemImage: "gearshape")
-            }
-        }
-        .alert("Notifications Disabled", isPresented: $showingNotificationAlert) {
-            Button("OK") { }
-        } message: {
-            Text("Enable notifications in Settings to receive reminders.")
         }
     }
 
@@ -316,36 +298,6 @@ struct PushManagerView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var targetSection: some View {
-        SectionCard(title: "Set your daily target") {
-            VStack(alignment: .leading, spacing: 16) {
-                Picker("Target type", selection: $store.targetType) {
-                    ForEach(TargetType.allCases) { type in
-                        Text(type.label).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                if store.targetType == .dailyTotal {
-                    Stepper(value: $store.dailyTarget, in: 1...1000) {
-                        Text("Daily pushup target: \(store.dailyTarget)")
-                    }
-                } else {
-                    Stepper(value: $store.incrementSize, in: 1...200) {
-                        Text("Pushups per set: \(store.incrementSize)")
-                    }
-                    Stepper(value: $store.setsPerDay, in: 1...50) {
-                        Text("Sets per day: \(store.setsPerDay)")
-                    }
-                }
-            }
-            .onChange(of: store.targetType) { _ in store.save() }
-            .onChange(of: store.dailyTarget) { _ in store.save() }
-            .onChange(of: store.incrementSize) { _ in store.save() }
-            .onChange(of: store.setsPerDay) { _ in store.save() }
-        }
     }
 
     private var logSection: some View {
@@ -476,6 +428,65 @@ struct PushManagerView: View {
             }
         }
     }
+}
+
+struct AdminView: View {
+    @EnvironmentObject private var store: PushupStore
+    @State private var showingNotificationAlert = false
+    @State private var newReminderTime: Date = PushupStore.defaultReminderTime()
+    @State private var showingReminderResult = false
+    @State private var reminderResultMessage = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                targetSection
+                remindersSection
+            }
+            .padding()
+        }
+        .navigationTitle("Settings")
+        .alert("Notifications Disabled", isPresented: $showingNotificationAlert) {
+            Button("OK") { }
+        } message: {
+            Text("Enable notifications in Settings to receive reminders.")
+        }
+        .alert("Reminder status", isPresented: $showingReminderResult) {
+            Button("OK") { }
+        } message: {
+            Text(reminderResultMessage)
+        }
+    }
+
+    private var targetSection: some View {
+        SectionCard(title: "Set your daily target") {
+            VStack(alignment: .leading, spacing: 16) {
+                Picker("Target type", selection: $store.targetType) {
+                    ForEach(TargetType.allCases) { type in
+                        Text(type.label).tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if store.targetType == .dailyTotal {
+                    Stepper(value: $store.dailyTarget, in: 1...1000) {
+                        Text("Daily pushup target: \(store.dailyTarget)")
+                    }
+                } else {
+                    Stepper(value: $store.incrementSize, in: 1...200) {
+                        Text("Pushups per set: \(store.incrementSize)")
+                    }
+                    Stepper(value: $store.setsPerDay, in: 1...50) {
+                        Text("Sets per day: \(store.setsPerDay)")
+                    }
+                }
+            }
+            .onChange(of: store.targetType) { _ in store.save() }
+            .onChange(of: store.dailyTarget) { _ in store.save() }
+            .onChange(of: store.incrementSize) { _ in store.save() }
+            .onChange(of: store.setsPerDay) { _ in store.save() }
+        }
+    }
 
     private var remindersSection: some View {
         SectionCard(title: "Notification setup") {
@@ -494,42 +505,31 @@ struct PushManagerView: View {
                 }
 
                 Toggle("Enable daily reminders", isOn: $store.reminderEnabled)
-                Text("When enabled, we will send a notification at each time you set below.")
+                Text("Turning this on will request notification access and schedule reminders at the times below.")
                     .font(.caption)
                     .foregroundColor(.secondary)
-
-                Button("Turn on notifications") {
-                    NotificationScheduler.updateReminder(store: store) { authorized in
-                        if !authorized {
-                            store.reminderEnabled = false
-                            showingNotificationAlert = true
-                        }
-                        store.save()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
 
                 if store.reminderEnabled {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Reminder times")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                        ForEach(Array(store.reminderTimes.enumerated()), id: \.offset) { index, _ in
+                        if store.reminderTimes.isEmpty {
+                            Text("No reminder times yet.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        ForEach($store.reminderTimes, id: \.self) { $time in
                             HStack {
                                 DatePicker(
-                                    "Reminder \(index + 1)",
-                                    selection: Binding(
-                                        get: { store.reminderTimes[index] },
-                                        set: { newValue in
-                                            store.reminderTimes[index] = newValue
-                                            store.reminderTimes.sort { $0 < $1 }
-                                            store.save()
-                                        }
-                                    ),
+                                    "Reminder",
+                                    selection: $time,
                                     displayedComponents: .hourAndMinute
                                 )
                                 Button("Remove") {
-                                    store.removeReminderTime(at: index)
+                                    if let index = store.reminderTimes.firstIndex(of: time) {
+                                        store.removeReminderTime(at: index)
+                                    }
                                 }
                                 .buttonStyle(.borderless)
                             }
@@ -549,6 +549,12 @@ struct PushManagerView: View {
                             if !authorized {
                                 store.reminderEnabled = false
                                 showingNotificationAlert = true
+                                reminderResultMessage = "Reminders not saved. Enable notifications in Settings."
+                                showingReminderResult = true
+                            }
+                            if authorized {
+                                reminderResultMessage = "Reminders saved."
+                                showingReminderResult = true
                             }
                             store.save()
                         }
@@ -564,11 +570,20 @@ struct PushManagerView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .onChange(of: store.reminderTimes) { _ in
+                store.reminderTimes.sort { $0 < $1 }
+                store.save()
+            }
             .onChange(of: store.reminderEnabled) { _ in
                 NotificationScheduler.updateReminder(store: store) { authorized in
                     if !authorized {
                         store.reminderEnabled = false
                         showingNotificationAlert = true
+                        reminderResultMessage = "Notifications are disabled. Enable them in Settings."
+                        showingReminderResult = true
+                    } else {
+                        reminderResultMessage = store.reminderEnabled ? "Reminders enabled." : "Reminders turned off."
+                        showingReminderResult = true
                     }
                     store.save()
                 }
@@ -588,6 +603,7 @@ struct PushManagerView: View {
             .joined(separator: ", ")
         return "Reminders set for \(times)."
     }
+
 }
 
 struct StatCard: View {
