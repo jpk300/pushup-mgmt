@@ -24,9 +24,13 @@ final class PushupStore: ObservableObject {
     @Published var setsPerDay: Int = 5
     @Published var entries: [PushupEntry] = []
     @Published var reminderEnabled: Bool = false
-    @Published var reminderTime: Date = Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
+    @Published var reminderTimes: [Date] = [PushupStore.defaultReminderTime()]
 
     private let storageKey = "pushManagerStore"
+
+    static func defaultReminderTime() -> Date {
+        Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
+    }
 
     func dailyTargetTotal() -> Int {
         targetType == .incremental ? incrementSize * setsPerDay : dailyTarget
@@ -73,7 +77,7 @@ final class PushupStore: ObservableObject {
             setsPerDay: setsPerDay,
             entries: entries,
             reminderEnabled: reminderEnabled,
-            reminderTime: reminderTime
+            reminderTimes: reminderTimes
         )
         if let data = try? JSONEncoder().encode(payload) {
             UserDefaults.standard.set(data, forKey: storageKey)
@@ -91,7 +95,19 @@ final class PushupStore: ObservableObject {
         setsPerDay = payload.setsPerDay
         entries = payload.entries
         reminderEnabled = payload.reminderEnabled
-        reminderTime = payload.reminderTime
+        reminderTimes = payload.reminderTimes
+    }
+
+    func addReminderTime(_ time: Date) {
+        reminderTimes.append(time)
+        reminderTimes.sort { $0 < $1 }
+        save()
+    }
+
+    func removeReminderTime(at index: Int) {
+        guard reminderTimes.indices.contains(index) else { return }
+        reminderTimes.remove(at: index)
+        save()
     }
 }
 
@@ -102,7 +118,64 @@ struct StorePayload: Codable {
     var setsPerDay: Int
     var entries: [PushupEntry]
     var reminderEnabled: Bool
-    var reminderTime: Date
+    var reminderTimes: [Date]
+
+    init(
+        targetType: TargetType,
+        dailyTarget: Int,
+        incrementSize: Int,
+        setsPerDay: Int,
+        entries: [PushupEntry],
+        reminderEnabled: Bool,
+        reminderTimes: [Date]
+    ) {
+        self.targetType = targetType
+        self.dailyTarget = dailyTarget
+        self.incrementSize = incrementSize
+        self.setsPerDay = setsPerDay
+        self.entries = entries
+        self.reminderEnabled = reminderEnabled
+        self.reminderTimes = reminderTimes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        targetType = try container.decode(TargetType.self, forKey: .targetType)
+        dailyTarget = try container.decode(Int.self, forKey: .dailyTarget)
+        incrementSize = try container.decode(Int.self, forKey: .incrementSize)
+        setsPerDay = try container.decode(Int.self, forKey: .setsPerDay)
+        entries = try container.decode([PushupEntry].self, forKey: .entries)
+        reminderEnabled = try container.decode(Bool.self, forKey: .reminderEnabled)
+        if let times = try? container.decode([Date].self, forKey: .reminderTimes) {
+            reminderTimes = times
+        } else if let legacyTime = try? container.decode(Date.self, forKey: .reminderTime) {
+            reminderTimes = [legacyTime]
+        } else {
+            reminderTimes = [PushupStore.defaultReminderTime()]
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(targetType, forKey: .targetType)
+        try container.encode(dailyTarget, forKey: .dailyTarget)
+        try container.encode(incrementSize, forKey: .incrementSize)
+        try container.encode(setsPerDay, forKey: .setsPerDay)
+        try container.encode(entries, forKey: .entries)
+        try container.encode(reminderEnabled, forKey: .reminderEnabled)
+        try container.encode(reminderTimes, forKey: .reminderTimes)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case targetType
+        case dailyTarget
+        case incrementSize
+        case setsPerDay
+        case entries
+        case reminderEnabled
+        case reminderTimes
+        case reminderTime
+    }
 }
 
 struct PushupEntry: Identifiable, Codable {
@@ -178,6 +251,8 @@ struct PushManagerView: View {
     @State private var logCount: String = ""
     @State private var rangeOption: RangeOption = .weekly
     @State private var showingNotificationAlert = false
+    @State private var newReminderTime: Date = PushupStore.defaultReminderTime()
+    @FocusState private var isLogFieldFocused: Bool
 
     var body: some View {
         NavigationView {
@@ -191,7 +266,7 @@ struct PushManagerView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Push Manager")
+            .navigationTitle("Jason's Pushup Tracker")
         }
         .alert("Notifications Disabled", isPresented: $showingNotificationAlert) {
             Button("OK") { }
@@ -250,10 +325,12 @@ struct PushManagerView: View {
                     TextField("Pushups completed", text: $logCount)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
+                        .focused($isLogFieldFocused)
                     Button("Add set") {
                         guard let count = Int(logCount), count > 0 else { return }
                         store.addEntry(count: count)
                         logCount = ""
+                        isLogFieldFocused = false
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -330,9 +407,51 @@ struct PushManagerView: View {
         SectionCard(title: "Reminders") {
             VStack(alignment: .leading, spacing: 16) {
                 Toggle("Daily reminder", isOn: $store.reminderEnabled)
-                DatePicker("Reminder time", selection: $store.reminderTime, displayedComponents: .hourAndMinute)
+                Text("Enable notifications to receive reminders when you are behind on your target.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button("Enable notifications") {
+                    NotificationScheduler.updateReminder(store: store) { authorized in
+                        if !authorized {
+                            store.reminderEnabled = false
+                            showingNotificationAlert = true
+                        }
+                        store.save()
+                    }
+                }
+                .buttonStyle(.bordered)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(store.reminderTimes.enumerated()), id: \.offset) { index, _ in
+                        HStack {
+                            DatePicker(
+                                "Reminder \(index + 1)",
+                                selection: Binding(
+                                    get: { store.reminderTimes[index] },
+                                    set: { newValue in
+                                        store.reminderTimes[index] = newValue
+                                        store.reminderTimes.sort { $0 < $1 }
+                                        store.save()
+                                    }
+                                ),
+                                displayedComponents: .hourAndMinute
+                            )
+                            Button("Remove") {
+                                store.removeReminderTime(at: index)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
 
-                Button("Save reminder") {
+                    HStack {
+                        DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
+                        Button("Add time") {
+                            store.addReminderTime(newReminderTime)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Button("Save reminders") {
                     NotificationScheduler.updateReminder(store: store) { authorized in
                         if !authorized {
                             store.reminderEnabled = false
@@ -343,13 +462,33 @@ struct PushManagerView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Text(store.reminderEnabled ? "Reminders set for \(store.reminderTime.formatted(date: .omitted, time: .shortened))." : "Reminders are off.")
+                Text(reminderStatusText())
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            .onChange(of: store.reminderEnabled) { _ in store.save() }
-            .onChange(of: store.reminderTime) { _ in store.save() }
+            .onChange(of: store.reminderEnabled) { _ in
+                NotificationScheduler.updateReminder(store: store) { authorized in
+                    if !authorized {
+                        store.reminderEnabled = false
+                        showingNotificationAlert = true
+                    }
+                    store.save()
+                }
+            }
         }
+    }
+
+    private func reminderStatusText() -> String {
+        guard store.reminderEnabled else {
+            return "Reminders are off."
+        }
+        if store.reminderTimes.isEmpty {
+            return "Add at least one reminder time."
+        }
+        let times = store.reminderTimes
+            .map { $0.formatted(date: .omitted, time: .shortened) }
+            .joined(separator: ", ")
+        return "Reminders set for \(times)."
     }
 }
 
@@ -433,19 +572,25 @@ enum NotificationScheduler {
                     completion(false)
                     return
                 }
-                center.removePendingNotificationRequests(withIdentifiers: ["pushup-reminder"])
-                guard store.reminderEnabled else {
+                center.removeAllPendingNotificationRequests()
+                guard store.reminderEnabled, !store.reminderTimes.isEmpty else {
                     completion(true)
                     return
                 }
-                let content = UNMutableNotificationContent()
-                content.title = "Push Manager reminder"
-                content.body = "Log your pushups to stay on target today."
+                for (index, time) in store.reminderTimes.enumerated() {
+                    let content = UNMutableNotificationContent()
+                    content.title = "Push Manager reminder"
+                    content.body = "Log your pushups to stay on target today."
 
-                let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: store.reminderTime)
-                let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-                let request = UNNotificationRequest(identifier: "pushup-reminder", content: content, trigger: trigger)
-                center.add(request)
+                    let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: time)
+                    let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+                    let request = UNNotificationRequest(
+                        identifier: "pushup-reminder-\(index)",
+                        content: content,
+                        trigger: trigger
+                    )
+                    center.add(request)
+                }
                 completion(true)
             }
         }
