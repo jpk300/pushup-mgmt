@@ -41,6 +41,17 @@ final class PushupStore: ObservableObject {
         save()
     }
 
+    func updateEntry(id: UUID, count: Int) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
+        save()
+    }
+
+    func removeEntry(id: UUID) {
+        entries.removeAll { $0.id == id }
+        save()
+    }
+
     func total(for day: Date) -> Int {
         entries
             .filter { Calendar.current.isDate($0.timestamp, inSameDayAs: day) }
@@ -252,21 +263,40 @@ struct PushManagerView: View {
     @State private var rangeOption: RangeOption = .weekly
     @State private var showingNotificationAlert = false
     @State private var newReminderTime: Date = PushupStore.defaultReminderTime()
+    @State private var editingEntry: PushupEntry?
+    @State private var editCount: String = ""
     @FocusState private var isLogFieldFocused: Bool
 
     var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    heroSection
-                    targetSection
-                    logSection
-                    insightsSection
-                    remindersSection
+        TabView {
+            NavigationView {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        heroSection
+                        logSection
+                        insightsSection
+                    }
+                    .padding()
                 }
-                .padding()
+                .navigationTitle("Jason's Pushup Tracker")
             }
-            .navigationTitle("Jason's Pushup Tracker")
+            .tabItem {
+                Label("Track", systemImage: "figure.strengthtraining.traditional")
+            }
+
+            NavigationView {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        targetSection
+                        remindersSection
+                    }
+                    .padding()
+                }
+                .navigationTitle("Admin")
+            }
+            .tabItem {
+                Label("Admin", systemImage: "gearshape")
+            }
         }
         .alert("Notifications Disabled", isPresented: $showingNotificationAlert) {
             Button("OK") { }
@@ -343,20 +373,64 @@ struct PushManagerView: View {
                     Text("Today")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    if store.entries.filter({ Calendar.current.isDateInToday($0.timestamp) }).isEmpty {
+                    let todaysEntries = store.entries.filter { Calendar.current.isDateInToday($0.timestamp) }
+                    if todaysEntries.isEmpty {
                         Text("No sets logged yet today.")
                             .foregroundColor(.secondary)
                     } else {
-                        ForEach(store.entries.filter { Calendar.current.isDateInToday($0.timestamp) }.reversed()) { entry in
+                        ForEach(todaysEntries.reversed()) { entry in
                             HStack {
                                 Text("\(entry.count) pushups")
                                 Spacer()
                                 Text(entry.timestamp, style: .time)
                                     .foregroundColor(.secondary)
+                                Button("Edit") {
+                                    editingEntry = entry
+                                    editCount = "\(entry.count)"
+                                }
+                                .buttonStyle(.borderless)
                             }
                             .padding(10)
                             .background(Color(.secondarySystemBackground))
                             .cornerRadius(12)
+                            .contextMenu {
+                                Button("Edit") {
+                                    editingEntry = entry
+                                    editCount = "\(entry.count)"
+                                }
+                                Button("Delete", role: .destructive) {
+                                    store.removeEntry(id: entry.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(item: $editingEntry) { entry in
+            NavigationView {
+                Form {
+                    Section(header: Text("Update set")) {
+                        TextField("Pushups", text: $editCount)
+                            .keyboardType(.numberPad)
+                    }
+                    Section {
+                        Button("Save changes") {
+                            guard let count = Int(editCount), count > 0 else { return }
+                            store.updateEntry(id: entry.id, count: count)
+                            editingEntry = nil
+                        }
+                        Button("Delete set", role: .destructive) {
+                            store.removeEntry(id: entry.id)
+                            editingEntry = nil
+                        }
+                    }
+                }
+                .navigationTitle("Edit set")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            editingEntry = nil
                         }
                     }
                 }
@@ -404,13 +478,27 @@ struct PushManagerView: View {
     }
 
     private var remindersSection: some View {
-        SectionCard(title: "Reminders") {
+        SectionCard(title: "Notification setup") {
             VStack(alignment: .leading, spacing: 16) {
-                Toggle("Daily reminder", isOn: $store.reminderEnabled)
-                Text("Enable notifications to receive reminders when you are behind on your target.")
+                HStack(spacing: 12) {
+                    Image(systemName: "bell.badge.fill")
+                        .foregroundColor(.orange)
+                        .font(.title2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Pushup reminders")
+                            .font(.headline)
+                        Text("Get nudges if you are behind on your daily target.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Toggle("Enable daily reminders", isOn: $store.reminderEnabled)
+                Text("When enabled, we will send a notification at each time you set below.")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Button("Enable notifications") {
+
+                Button("Turn on notifications") {
                     NotificationScheduler.updateReminder(store: store) { authorized in
                         if !authorized {
                             store.reminderEnabled = false
@@ -419,48 +507,58 @@ struct PushManagerView: View {
                         store.save()
                     }
                 }
-                .buttonStyle(.bordered)
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(store.reminderTimes.enumerated()), id: \.offset) { index, _ in
-                        HStack {
-                            DatePicker(
-                                "Reminder \(index + 1)",
-                                selection: Binding(
-                                    get: { store.reminderTimes[index] },
-                                    set: { newValue in
-                                        store.reminderTimes[index] = newValue
-                                        store.reminderTimes.sort { $0 < $1 }
-                                        store.save()
-                                    }
-                                ),
-                                displayedComponents: .hourAndMinute
-                            )
-                            Button("Remove") {
-                                store.removeReminderTime(at: index)
+                .buttonStyle(.borderedProminent)
+
+                if store.reminderEnabled {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Reminder times")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        ForEach(Array(store.reminderTimes.enumerated()), id: \.offset) { index, _ in
+                            HStack {
+                                DatePicker(
+                                    "Reminder \(index + 1)",
+                                    selection: Binding(
+                                        get: { store.reminderTimes[index] },
+                                        set: { newValue in
+                                            store.reminderTimes[index] = newValue
+                                            store.reminderTimes.sort { $0 < $1 }
+                                            store.save()
+                                        }
+                                    ),
+                                    displayedComponents: .hourAndMinute
+                                )
+                                Button("Remove") {
+                                    store.removeReminderTime(at: index)
+                                }
+                                .buttonStyle(.borderless)
                             }
-                            .buttonStyle(.borderless)
+                        }
+
+                        HStack {
+                            DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
+                            Button("Add time") {
+                                store.addReminderTime(newReminderTime)
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
 
-                    HStack {
-                        DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
-                        Button("Add time") {
-                            store.addReminderTime(newReminderTime)
+                    Button("Save reminders") {
+                        NotificationScheduler.updateReminder(store: store) { authorized in
+                            if !authorized {
+                                store.reminderEnabled = false
+                                showingNotificationAlert = true
+                            }
+                            store.save()
                         }
-                        .buttonStyle(.bordered)
                     }
+                    .buttonStyle(.bordered)
+                } else {
+                    Text("Turn on reminders above, then add times to schedule your notifications.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
-
-                Button("Save reminders") {
-                    NotificationScheduler.updateReminder(store: store) { authorized in
-                        if !authorized {
-                            store.reminderEnabled = false
-                            showingNotificationAlert = true
-                        }
-                        store.save()
-                    }
-                }
-                .buttonStyle(.bordered)
 
                 Text(reminderStatusText())
                     .font(.caption)

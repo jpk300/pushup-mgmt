@@ -11,7 +11,7 @@ multiple ranges, and receive reminders.
 - Progress bar and streak tracking
 - Daily log of pushup sets
 - Range insights (daily, weekly, monthly, quarterly, yearly)
-- Local notifications for reminders
+- Local notifications with multiple reminder times
 
 ## Open in Xcode
 
@@ -19,7 +19,9 @@ multiple ranges, and receive reminders.
 2. Create a new **iOS App** project named `PushManager`.
 3. Replace the generated `PushManagerApp.swift` with the file in
    `ios/PushManager/PushManagerApp.swift`.
-4. Ensure the project target is set to your iPhone and run.
+4. If Xcode generated a `ContentView.swift`, you can delete it (the app uses
+   `PushManagerView` to avoid a duplicate `ContentView` symbol).
+5. Ensure the project target is set to your iPhone and run.
 
 ## Version control with GitHub (SSH)
 
