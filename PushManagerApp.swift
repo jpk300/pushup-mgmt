@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UserNotifications
 
 @main
@@ -7,7 +8,7 @@ struct PushManagerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            PushManagerView()
                 .environmentObject(store)
                 .onAppear {
                     store.load()
@@ -172,7 +173,7 @@ enum RangeOption: String, CaseIterable, Identifiable {
     }
 }
 
-struct ContentView: View {
+struct PushManagerView: View {
     @EnvironmentObject private var store: PushupStore
     @State private var logCount: String = ""
     @State private var rangeOption: RangeOption = .weekly
@@ -450,4 +451,3 @@ enum NotificationScheduler {
         }
     }
 }
-
