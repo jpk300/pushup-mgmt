@@ -12,6 +12,7 @@ struct PushManagerApp: App {
         WindowGroup {
             PushManagerView()
                 .environmentObject(store)
+                .tint(.blueSteel)
                 .onAppear {
                     store.load()
                 }
@@ -27,6 +28,9 @@ final class PushupStore: ObservableObject {
     @Published var entries: [PushupEntry] = []
     @Published var reminderEnabled: Bool = false
     @Published var reminderTimes: [Date] = [PushupStore.defaultReminderTime()]
+    @Published var showMonthly: Bool = true
+    @Published var showQuarterly: Bool = true
+    @Published var showYearly: Bool = true
 
     private let storageKey = "pushManagerStore"
 
@@ -123,7 +127,10 @@ final class PushupStore: ObservableObject {
             setsPerDay: setsPerDay,
             entries: entries,
             reminderEnabled: reminderEnabled,
-            reminderTimes: reminderTimes
+            reminderTimes: reminderTimes,
+            showMonthly: showMonthly,
+            showQuarterly: showQuarterly,
+            showYearly: showYearly
         )
         if let data = try? JSONEncoder().encode(payload) {
             UserDefaults.standard.set(data, forKey: storageKey)
@@ -142,6 +149,9 @@ final class PushupStore: ObservableObject {
         entries = payload.entries
         reminderEnabled = payload.reminderEnabled
         reminderTimes = payload.reminderTimes
+        showMonthly = payload.showMonthly
+        showQuarterly = payload.showQuarterly
+        showYearly = payload.showYearly
     }
 
     func addReminderTime(_ time: Date) {
@@ -165,6 +175,9 @@ struct StorePayload: Codable {
     var entries: [PushupEntry]
     var reminderEnabled: Bool
     var reminderTimes: [Date]
+    var showMonthly: Bool
+    var showQuarterly: Bool
+    var showYearly: Bool
 
     init(
         targetType: TargetType,
@@ -173,7 +186,10 @@ struct StorePayload: Codable {
         setsPerDay: Int,
         entries: [PushupEntry],
         reminderEnabled: Bool,
-        reminderTimes: [Date]
+        reminderTimes: [Date],
+        showMonthly: Bool,
+        showQuarterly: Bool,
+        showYearly: Bool
     ) {
         self.targetType = targetType
         self.dailyTarget = dailyTarget
@@ -182,6 +198,9 @@ struct StorePayload: Codable {
         self.entries = entries
         self.reminderEnabled = reminderEnabled
         self.reminderTimes = reminderTimes
+        self.showMonthly = showMonthly
+        self.showQuarterly = showQuarterly
+        self.showYearly = showYearly
     }
 
     init(from decoder: Decoder) throws {
@@ -192,6 +211,9 @@ struct StorePayload: Codable {
         setsPerDay = try container.decode(Int.self, forKey: .setsPerDay)
         entries = try container.decode([PushupEntry].self, forKey: .entries)
         reminderEnabled = try container.decode(Bool.self, forKey: .reminderEnabled)
+        showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
+        showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
+        showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
         if let times = try? container.decode([Date].self, forKey: .reminderTimes) {
             reminderTimes = times
         } else if let legacyTime = try? container.decode(Date.self, forKey: .reminderTime) {
@@ -210,6 +232,9 @@ struct StorePayload: Codable {
         try container.encode(entries, forKey: .entries)
         try container.encode(reminderEnabled, forKey: .reminderEnabled)
         try container.encode(reminderTimes, forKey: .reminderTimes)
+        try container.encode(showMonthly, forKey: .showMonthly)
+        try container.encode(showQuarterly, forKey: .showQuarterly)
+        try container.encode(showYearly, forKey: .showYearly)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -221,6 +246,9 @@ struct StorePayload: Codable {
         case reminderEnabled
         case reminderTimes
         case reminderTime
+        case showMonthly
+        case showQuarterly
+        case showYearly
     }
 }
 
@@ -305,6 +333,13 @@ struct PushManagerView: View {
     @State private var editingEntry: PushupEntry?
     @State private var editCount: String = ""
     @FocusState private var isLogFieldFocused: Bool
+    private var availableRanges: [RangeOption] {
+        var ranges: [RangeOption] = [.daily, .weekly]
+        if store.showMonthly { ranges.append(.monthly) }
+        if store.showQuarterly { ranges.append(.quarterly) }
+        if store.showYearly { ranges.append(.yearly) }
+        return ranges
+    }
 
     var body: some View {
         NavigationView {
@@ -442,11 +477,14 @@ struct PushManagerView: View {
         SectionCard(title: "Insights") {
             VStack(alignment: .leading, spacing: 16) {
                 Picker("Range", selection: $rangeOption) {
-                    ForEach(RangeOption.allCases) { option in
+                    ForEach(availableRanges) { option in
                         Text(option.label).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: store.showMonthly) { _ in ensureValidRangeSelection() }
+                .onChange(of: store.showQuarterly) { _ in ensureValidRangeSelection() }
+                .onChange(of: store.showYearly) { _ in ensureValidRangeSelection() }
 
                 let totals = store.totals(for: rangeOption)
                 let sum = totals.reduce(0) { $0 + $1.total }
@@ -482,6 +520,12 @@ struct PushManagerView: View {
         }
     }
 
+    private func ensureValidRangeSelection() {
+        if !availableRanges.contains(rangeOption) {
+            rangeOption = .weekly
+        }
+    }
+
 }
 
 struct AdminView: View {
@@ -494,6 +538,7 @@ struct AdminView: View {
         ScrollView {
             VStack(spacing: 20) {
                 targetSection
+                insightsSettingsSection
                 remindersSection
             }
             .padding()
@@ -635,6 +680,22 @@ struct AdminView: View {
         }
     }
 
+    private var insightsSettingsSection: some View {
+        SectionCard(title: "Insights time frames") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Daily and weekly are always shown. Toggle additional ranges below.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Toggle("Show monthly", isOn: $store.showMonthly)
+                Toggle("Show quarterly", isOn: $store.showQuarterly)
+                Toggle("Show yearly", isOn: $store.showYearly)
+            }
+            .onChange(of: store.showMonthly) { _ in store.save() }
+            .onChange(of: store.showQuarterly) { _ in store.save() }
+            .onChange(of: store.showYearly) { _ in store.save() }
+        }
+    }
+
     private func reminderStatusText() -> String {
         guard store.reminderEnabled else {
             return "Reminders are off."
@@ -769,6 +830,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
         view.session.delegate = context.coordinator
         view.automaticallyUpdatesLighting = true
         view.scene = SCNScene()
+        context.coordinator.attachBlurOverlay(to: view)
         context.coordinator.startSession(on: view.session)
         return view
     }
@@ -784,6 +846,9 @@ struct CameraPushupCounterView: UIViewRepresentable {
         private var baselineDistance: Double?
         private var isNear: Bool = false
         private weak var session: ARSession?
+        private weak var sceneView: ARSCNView?
+        private weak var blurView: UIVisualEffectView?
+        private let maskLayer = CAShapeLayer()
 
         init(
             count: Binding<Int>,
@@ -799,6 +864,18 @@ struct CameraPushupCounterView: UIViewRepresentable {
             self.onPermissionResult = onPermissionResult
             super.init()
             NotificationCenter.default.addObserver(self, selector: #selector(resetCalibration), name: .resetPushupCalibration, object: nil)
+        }
+
+        func attachBlurOverlay(to view: ARSCNView) {
+            sceneView = view
+            let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+            blur.frame = view.bounds
+            blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            maskLayer.fillRule = .evenOdd
+            blur.layer.mask = maskLayer
+            view.addSubview(blur)
+            blurView = blur
+            updateBlurMask(center: CGPoint(x: view.bounds.midX, y: view.bounds.midY), in: view.bounds)
         }
 
         func startSession(on session: ARSession) {
@@ -850,7 +927,32 @@ struct CameraPushupCounterView: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.currentDistance = zDistance
                 self.handleDistance(zDistance)
+                if let point = self.projectFaceCenter(faceTransform) {
+                    self.updateBlurMask(center: point, in: self.sceneView?.bounds ?? .zero)
+                }
             }
+        }
+
+        private func projectFaceCenter(_ transform: simd_float4x4) -> CGPoint? {
+            guard let sceneView else { return nil }
+            let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+            let projected = sceneView.projectPoint(SCNVector3(position))
+            return CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
+        }
+
+        private func updateBlurMask(center: CGPoint, in bounds: CGRect) {
+            guard bounds.width > 0, bounds.height > 0 else { return }
+            let radius: CGFloat = 120
+            let path = UIBezierPath(rect: bounds)
+            let holeRect = CGRect(
+                x: center.x - radius,
+                y: center.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
+            path.append(UIBezierPath(ovalIn: holeRect))
+            maskLayer.frame = bounds
+            maskLayer.path = path.cgPath
         }
 
         private func handleDistance(_ distance: Double) {
@@ -907,7 +1009,7 @@ struct StatCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
+        .background(Color.blueSteel.opacity(0.15))
         .cornerRadius(16)
     }
 }
@@ -924,7 +1026,7 @@ struct SectionCard<Content: View>: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
+        .background(Color.blueSteel.opacity(0.08))
         .cornerRadius(20)
         .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 4)
     }
@@ -1032,4 +1134,8 @@ enum NotificationScheduler {
             }
         }
     }
+}
+
+extension Color {
+    static let blueSteel = Color(red: 0.27, green: 0.46, blue: 0.60)
 }
