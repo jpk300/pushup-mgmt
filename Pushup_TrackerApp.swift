@@ -1,6 +1,8 @@
 import SwiftUI
 import Combine
 import UserNotifications
+import ARKit
+import AVFoundation
 
 @main
 struct PushManagerApp: App {
@@ -314,13 +316,20 @@ struct PushManagerView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Jason's Pushup Tracker")
+            .navigationTitle("Push Up Tracker")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink("Pushup Camera") {
+                        CameraView()
+                    }
+                    .foregroundColor(.blue)
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink("Settings") {
                         AdminView()
                             .environmentObject(store)
                     }
+                    .foregroundColor(.blue)
                 }
             }
         }
@@ -481,7 +490,6 @@ struct AdminView: View {
     @State private var newReminderTime: Date = PushupStore.defaultReminderTime()
     @State private var showingReminderResult = false
     @State private var reminderResultMessage = ""
-
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -638,6 +646,245 @@ struct AdminView: View {
             .map { $0.formatted(date: .omitted, time: .shortened) }
             .joined(separator: ", ")
         return "Reminders set for \(times)."
+    }
+
+}
+
+struct CameraView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: PushupStore
+    @State private var cameraCount: Int = 0
+    @State private var cameraStatus: String = "Not calibrated"
+    @State private var cameraDistance: Double?
+    @State private var showingCameraAlert = false
+    @State private var cameraAlertMessage = ""
+    @State private var isCounting: Bool = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                SectionCard(title: "Camera pushup counter") {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Use the iPhone TrueDepth camera to estimate face distance for pushup counting.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        CameraPushupCounterView(
+                            count: $cameraCount,
+                            statusText: $cameraStatus,
+                            currentDistance: $cameraDistance,
+                            isCounting: $isCounting,
+                            onPermissionResult: { message in
+                                cameraAlertMessage = message
+                                showingCameraAlert = true
+                            }
+                        )
+                        .frame(height: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Pushups counted")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(cameraCount)")
+                                .font(.largeTitle)
+                                .fontWeight(.bold)
+                        }
+
+                        if let distance = cameraDistance {
+                            Text("Estimated distance: \(String(format: "%.2f", distance)) m")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Text(cameraStatus)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        HStack {
+                            Button("Start counting") {
+                                isCounting = true
+                                cameraStatus = "Counting started."
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button("Stop counting") {
+                                isCounting = false
+                                if cameraCount > 0 {
+                                    store.addEntry(count: cameraCount)
+                                }
+                                cameraCount = 0
+                                cameraStatus = "Counting stopped."
+                                cameraDistance = nil
+                                NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
+                                dismiss()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        Button("Reset calibration") {
+                            cameraCount = 0
+                            cameraStatus = "Not calibrated"
+                            cameraDistance = nil
+                            NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Pushup Camera")
+        .alert("Camera access", isPresented: $showingCameraAlert) {
+            Button("OK") { }
+        } message: {
+            Text(cameraAlertMessage)
+        }
+    }
+}
+
+extension Notification.Name {
+    static let resetPushupCalibration = Notification.Name("resetPushupCalibration")
+}
+
+struct CameraPushupCounterView: UIViewRepresentable {
+    @Binding var count: Int
+    @Binding var statusText: String
+    @Binding var currentDistance: Double?
+    @Binding var isCounting: Bool
+    let onPermissionResult: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            count: $count,
+            statusText: $statusText,
+            currentDistance: $currentDistance,
+            isCounting: $isCounting,
+            onPermissionResult: onPermissionResult
+        )
+    }
+
+    func makeUIView(context: Context) -> ARSCNView {
+        let view = ARSCNView()
+        view.session.delegate = context.coordinator
+        view.automaticallyUpdatesLighting = true
+        view.scene = SCNScene()
+        context.coordinator.startSession(on: view.session)
+        return view
+    }
+
+    func updateUIView(_ uiView: ARSCNView, context: Context) {}
+
+    final class Coordinator: NSObject, ARSessionDelegate {
+        @Binding private var count: Int
+        @Binding private var statusText: String
+        @Binding private var currentDistance: Double?
+        @Binding private var isCounting: Bool
+        private let onPermissionResult: (String) -> Void
+        private var baselineDistance: Double?
+        private var isNear: Bool = false
+        private weak var session: ARSession?
+
+        init(
+            count: Binding<Int>,
+            statusText: Binding<String>,
+            currentDistance: Binding<Double?>,
+            isCounting: Binding<Bool>,
+            onPermissionResult: @escaping (String) -> Void
+        ) {
+            _count = count
+            _statusText = statusText
+            _currentDistance = currentDistance
+            _isCounting = isCounting
+            self.onPermissionResult = onPermissionResult
+            super.init()
+            NotificationCenter.default.addObserver(self, selector: #selector(resetCalibration), name: .resetPushupCalibration, object: nil)
+        }
+
+        func startSession(on session: ARSession) {
+            self.session = session
+            guard ARFaceTrackingConfiguration.isSupported else {
+                statusText = "Face tracking requires a TrueDepth camera."
+                return
+            }
+            requestCameraAccessIfNeeded()
+        }
+
+        private func requestCameraAccessIfNeeded() {
+            switch AVCaptureDevice.authorizationStatus(for: .video) {
+            case .authorized:
+                runSession()
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    DispatchQueue.main.async {
+                        if granted {
+                            self.onPermissionResult("Camera access granted.")
+                            self.runSession()
+                        } else {
+                            self.statusText = "Camera access denied."
+                            self.onPermissionResult("Camera access denied. Enable it in Settings.")
+                        }
+                    }
+                }
+            case .denied, .restricted:
+                statusText = "Camera access denied."
+                onPermissionResult("Camera access denied. Enable it in Settings.")
+            @unknown default:
+                statusText = "Camera access unavailable."
+                onPermissionResult("Camera access unavailable.")
+            }
+        }
+
+        private func runSession() {
+            guard let session else { return }
+            let configuration = ARFaceTrackingConfiguration()
+            configuration.isLightEstimationEnabled = true
+            session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+            statusText = "Look at the camera to calibrate."
+        }
+
+        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            guard let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first else { return }
+            let faceTransform = faceAnchor.transform
+            let zDistance = abs(Double(faceTransform.columns.3.z))
+            DispatchQueue.main.async {
+                self.currentDistance = zDistance
+                self.handleDistance(zDistance)
+            }
+        }
+
+        private func handleDistance(_ distance: Double) {
+            let nearThresholdMeters = 0.15
+            let toleranceMeters = 0.05
+
+            if baselineDistance == nil {
+                baselineDistance = distance
+                statusText = "Calibrated at \(String(format: "%.2f", distance)) m. Begin pushups."
+                return
+            }
+
+            guard isCounting else {
+                statusText = "Counting paused."
+                return
+            }
+
+            guard let baselineDistance = baselineDistance else { return }
+            let nearDistance = max(baselineDistance - nearThresholdMeters, 0.05)
+            if distance <= nearDistance && !isNear {
+                isNear = true
+                statusText = "Down position detected."
+            } else if distance >= baselineDistance - toleranceMeters && isNear {
+                isNear = false
+                count += 1
+                statusText = "Up position detected. Pushup counted."
+            }
+        }
+
+        @objc private func resetCalibration() {
+            baselineDistance = nil
+            isNear = false
+            statusText = "Not calibrated"
+        }
     }
 }
 
