@@ -1,7 +1,4 @@
-diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
-index 86298f86a90a1b515889403bc6236fef66850e3e..8e5b855e4a2dc1aad8cae5775c66754b9702bf26 100644
---- a/Pushup_TrackerApp.swift
-+++ b/Pushup_TrackerApp.swift
+diff a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift	(rejected hunks)
 @@ -5,85 +5,84 @@ import ARKit
  import AVFoundation
  
