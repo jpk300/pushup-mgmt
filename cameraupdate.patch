@@ -1,14 +1,15 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
-index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a6017b737b0b 100644
+index 114c7dc6d200d7a8411018e4f2f767ec748ab835..0cfc204c13ba994b3e02d97fc3f345270173e5cb 100644
 --- a/Pushup_TrackerApp.swift
 +++ b/Pushup_TrackerApp.swift
-@@ -1,65 +1,77 @@
+@@ -1,30 +1,31 @@
  import SwiftUI
  import Combine
  import UserNotifications
  import ARKit
  import AVFoundation
++import UIKit
  
  @main
  struct PushManagerApp: App {
@@ -26,7 +27,7 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
      }
  }
  
-+@MainActor
+ @MainActor
  final class PushupStore: ObservableObject {
      @Published var targetType: TargetType = .dailyTotal
      @Published var dailyTarget: Int = 50
@@ -34,376 +35,18 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
      @Published var setsPerDay: Int = 5
      @Published var entries: [PushupEntry] = []
      @Published var reminderEnabled: Bool = false
-     @Published var reminderTimes: [ReminderTime] = [ReminderTime(time: PushupStore.defaultReminderTime())]
-+    @Published var quietHoursEnabled: Bool = false
-+    @Published var quietHoursStart: Date = PushupStore.defaultQuietHoursStart()
-+    @Published var quietHoursEnd: Date = PushupStore.defaultQuietHoursEnd()
-     @Published var showMonthly: Bool = true
-     @Published var showQuarterly: Bool = true
-     @Published var showYearly: Bool = true
- 
-     private let storageKey = "pushManagerStore"
- 
-     static func defaultReminderTime() -> Date {
-         Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
-     }
- 
-+    static func defaultQuietHoursStart() -> Date {
-+        Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
-+    }
-+
-+    static func defaultQuietHoursEnd() -> Date {
-+        Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date()) ?? Date()
-+    }
-+
-     func dailyTargetTotal() -> Int {
-         targetType == .incremental ? incrementSize * setsPerDay : dailyTarget
-     }
- 
-     func addEntry(count: Int) {
-         entries.append(PushupEntry(count: count, timestamp: Date()))
-         save()
-     }
- 
-     func updateEntry(id: UUID, count: Int) {
-         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-         entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
-         save()
-     }
- 
-     func removeEntry(id: UUID) {
-         entries.removeAll { $0.id == id }
-         save()
-     }
- 
-     func total(for day: Date) -> Int {
-         let dayStart = Calendar.current.startOfDay(for: day)
-         return dailyTotals[dayStart] ?? 0
-     }
- 
-@@ -105,173 +117,197 @@ final class PushupStore: ObservableObject {
-         var index = 0
-         while index < dates.count {
-             let end = min(index + bucketSize, dates.count)
-             let bucket = dates[index..<end]
-             let sum = bucket.reduce(0) { partial, date in
-                 partial + total(for: date)
-             }
-             let average = Double(sum) / Double(bucket.count)
-             if let bucketDate = bucket.last {
-                 results.append(ChartEntry(date: bucketDate, value: average))
-             }
-             index = end
-         }
-         return results
-     }
- 
-     func save() {
-         let payload = StorePayload(
-             targetType: targetType,
-             dailyTarget: dailyTarget,
-             incrementSize: incrementSize,
-             setsPerDay: setsPerDay,
-             entries: entries,
-             reminderEnabled: reminderEnabled,
-             reminderTimes: reminderTimes,
-+            quietHoursEnabled: quietHoursEnabled,
-+            quietHoursStart: quietHoursStart,
-+            quietHoursEnd: quietHoursEnd,
-             showMonthly: showMonthly,
-             showQuarterly: showQuarterly,
-             showYearly: showYearly
-         )
-         if let data = try? JSONEncoder().encode(payload) {
-             UserDefaults.standard.set(data, forKey: storageKey)
-         }
-     }
- 
-     func load() {
-         guard let data = UserDefaults.standard.data(forKey: storageKey),
-               let payload = try? JSONDecoder().decode(StorePayload.self, from: data) else {
-             return
-         }
-         targetType = payload.targetType
-         dailyTarget = payload.dailyTarget
-         incrementSize = payload.incrementSize
-         setsPerDay = payload.setsPerDay
-         entries = payload.entries
-         reminderEnabled = payload.reminderEnabled
-         reminderTimes = payload.reminderTimes
-+        quietHoursEnabled = payload.quietHoursEnabled
-+        quietHoursStart = payload.quietHoursStart
-+        quietHoursEnd = payload.quietHoursEnd
-         showMonthly = payload.showMonthly
-         showQuarterly = payload.showQuarterly
-         showYearly = payload.showYearly
-     }
- 
-     func addReminderTime(_ time: Date) {
-         reminderTimes.append(ReminderTime(time: time))
-         reminderTimes.sort { $0.time < $1.time }
-         save()
-     }
- 
-     func removeReminderTime(at index: Int) {
-         guard reminderTimes.indices.contains(index) else { return }
-         reminderTimes.remove(at: index)
-         save()
-     }
- 
-     private var dailyTotals: [Date: Int] {
-         Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
-             .mapValues { $0.reduce(0) { $0 + $1.count } }
-     }
- }
- 
- struct StorePayload: Codable {
-     var targetType: TargetType
-     var dailyTarget: Int
-     var incrementSize: Int
-     var setsPerDay: Int
-     var entries: [PushupEntry]
-     var reminderEnabled: Bool
-     var reminderTimes: [ReminderTime]
-+    var quietHoursEnabled: Bool
-+    var quietHoursStart: Date
-+    var quietHoursEnd: Date
-     var showMonthly: Bool
-     var showQuarterly: Bool
-     var showYearly: Bool
- 
-     init(
-         targetType: TargetType,
-         dailyTarget: Int,
-         incrementSize: Int,
-         setsPerDay: Int,
-         entries: [PushupEntry],
-         reminderEnabled: Bool,
-         reminderTimes: [ReminderTime],
-+        quietHoursEnabled: Bool,
-+        quietHoursStart: Date,
-+        quietHoursEnd: Date,
-         showMonthly: Bool,
-         showQuarterly: Bool,
-         showYearly: Bool
-     ) {
-         self.targetType = targetType
-         self.dailyTarget = dailyTarget
-         self.incrementSize = incrementSize
-         self.setsPerDay = setsPerDay
-         self.entries = entries
-         self.reminderEnabled = reminderEnabled
-         self.reminderTimes = reminderTimes
-+        self.quietHoursEnabled = quietHoursEnabled
-+        self.quietHoursStart = quietHoursStart
-+        self.quietHoursEnd = quietHoursEnd
-         self.showMonthly = showMonthly
-         self.showQuarterly = showQuarterly
-         self.showYearly = showYearly
-     }
- 
-     init(from decoder: Decoder) throws {
-         let container = try decoder.container(keyedBy: CodingKeys.self)
-         targetType = try container.decode(TargetType.self, forKey: .targetType)
-         dailyTarget = try container.decode(Int.self, forKey: .dailyTarget)
-         incrementSize = try container.decode(Int.self, forKey: .incrementSize)
-         setsPerDay = try container.decode(Int.self, forKey: .setsPerDay)
-         entries = try container.decode([PushupEntry].self, forKey: .entries)
-         reminderEnabled = try container.decode(Bool.self, forKey: .reminderEnabled)
-         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
-         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
-         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
-+        quietHoursEnabled = (try? container.decode(Bool.self, forKey: .quietHoursEnabled)) ?? false
-+        quietHoursStart = (try? container.decode(Date.self, forKey: .quietHoursStart)) ?? PushupStore.defaultQuietHoursStart()
-+        quietHoursEnd = (try? container.decode(Date.self, forKey: .quietHoursEnd)) ?? PushupStore.defaultQuietHoursEnd()
-         if let times = try? container.decode([ReminderTime].self, forKey: .reminderTimes) {
-             reminderTimes = times
-         } else if let legacyTime = try? container.decode(Date.self, forKey: .reminderTime) {
-             reminderTimes = [ReminderTime(time: legacyTime)]
-         } else {
-             reminderTimes = [ReminderTime(time: PushupStore.defaultReminderTime())]
-         }
-     }
- 
-     func encode(to encoder: Encoder) throws {
-         var container = encoder.container(keyedBy: CodingKeys.self)
-         try container.encode(targetType, forKey: .targetType)
-         try container.encode(dailyTarget, forKey: .dailyTarget)
-         try container.encode(incrementSize, forKey: .incrementSize)
-         try container.encode(setsPerDay, forKey: .setsPerDay)
-         try container.encode(entries, forKey: .entries)
-         try container.encode(reminderEnabled, forKey: .reminderEnabled)
-         try container.encode(reminderTimes, forKey: .reminderTimes)
-+        try container.encode(quietHoursEnabled, forKey: .quietHoursEnabled)
-+        try container.encode(quietHoursStart, forKey: .quietHoursStart)
-+        try container.encode(quietHoursEnd, forKey: .quietHoursEnd)
-         try container.encode(showMonthly, forKey: .showMonthly)
-         try container.encode(showQuarterly, forKey: .showQuarterly)
-         try container.encode(showYearly, forKey: .showYearly)
-     }
- 
-     enum CodingKeys: String, CodingKey {
-         case targetType
-         case dailyTarget
-         case incrementSize
-         case setsPerDay
-         case entries
-         case reminderEnabled
-         case reminderTimes
-         case reminderTime
-+        case quietHoursEnabled
-+        case quietHoursStart
-+        case quietHoursEnd
-         case showMonthly
-         case showQuarterly
-         case showYearly
-     }
- }
- 
- struct PushupEntry: Identifiable, Codable {
-     let id: UUID
-     let count: Int
-     let timestamp: Date
- 
-     init(id: UUID = UUID(), count: Int, timestamp: Date) {
-         self.id = id
-         self.count = count
-         self.timestamp = timestamp
-     }
- }
- 
- struct RangeEntry: Identifiable {
-     let id = UUID()
-     let date: Date
-     let total: Int
- }
- 
- struct ReminderTime: Identifiable, Codable, Hashable {
-@@ -629,279 +665,365 @@ struct AdminView: View {
-                         ForEach($store.reminderTimes) { $reminder in
-                             HStack {
-                                 DatePicker(
-                                     "Reminder",
-                                     selection: $reminder.time,
-                                     displayedComponents: .hourAndMinute
-                                 )
-                                 Button("Remove") {
-                                     if let index = store.reminderTimes.firstIndex(of: reminder) {
-                                         store.removeReminderTime(at: index)
-                                     }
-                                 }
-                                 .buttonStyle(.borderless)
-                             }
-                         }
- 
-                         HStack {
-                             DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
-                             Button("Add time") {
-                                 store.addReminderTime(newReminderTime)
-                             }
-                             .buttonStyle(.bordered)
-                         }
-                     }
- 
-+                    VStack(alignment: .leading, spacing: 12) {
-+                        Toggle("Enable quiet hours", isOn: $store.quietHoursEnabled)
-+                        if store.quietHoursEnabled {
-+                            HStack {
-+                                DatePicker("Quiet hours start", selection: $store.quietHoursStart, displayedComponents: .hourAndMinute)
-+                                DatePicker("Quiet hours end", selection: $store.quietHoursEnd, displayedComponents: .hourAndMinute)
-+                            }
-+                        }
-+                    }
-+
-                     Button("Save reminders") {
-                         NotificationScheduler.updateReminder(store: store) { authorized in
-                             if !authorized {
-                                 store.reminderEnabled = false
-                                 showingNotificationAlert = true
-                                 reminderResultMessage = "Reminders not saved. Enable notifications in Settings."
-                                 showingReminderResult = true
-                             }
-                             if authorized {
-                                 reminderResultMessage = "Reminders saved."
-                                 showingReminderResult = true
-                             }
-                             store.save()
-                         }
-                     }
-                     .buttonStyle(.bordered)
-                 } else {
-                     Text("Turn on reminders above, then add times to schedule your notifications.")
-                         .font(.caption)
-                         .foregroundColor(.secondary)
-                 }
- 
-                 Text(reminderStatusText())
-                     .font(.caption)
-                     .foregroundColor(.secondary)
-             }
-             .onChange(of: store.reminderEnabled) { _ in
-                 NotificationScheduler.updateReminder(store: store) { authorized in
-                     if !authorized {
-                         store.reminderEnabled = false
-                         showingNotificationAlert = true
-                         reminderResultMessage = "Notifications are disabled. Enable them in Settings."
-                         showingReminderResult = true
-                     } else {
-                         reminderResultMessage = store.reminderEnabled ? "Reminders enabled." : "Reminders turned off."
-                         showingReminderResult = true
-                     }
-                     store.save()
-                 }
-             }
-+            .onChange(of: store.quietHoursEnabled) { _ in
-+                NotificationScheduler.updateReminder(store: store) { _ in
-+                    store.save()
-+                }
-+            }
-+            .onChange(of: store.quietHoursStart) { _ in
-+                NotificationScheduler.updateReminder(store: store) { _ in
-+                    store.save()
-+                }
-+            }
-+            .onChange(of: store.quietHoursEnd) { _ in
-+                NotificationScheduler.updateReminder(store: store) { _ in
-+                    store.save()
-+                }
-+            }
-         }
-     }
- 
-     private var insightsSettingsSection: some View {
-         SectionCard(title: "Insights time frames") {
-             VStack(alignment: .leading, spacing: 12) {
-                 Text("Daily and weekly are always shown. Toggle additional ranges below.")
-                     .font(.caption)
-                     .foregroundColor(.secondary)
-                 Toggle("Show monthly", isOn: $store.showMonthly)
-                 Toggle("Show quarterly", isOn: $store.showQuarterly)
-                 Toggle("Show yearly", isOn: $store.showYearly)
-             }
-             .onChange(of: store.showMonthly) { _ in store.save() }
-             .onChange(of: store.showQuarterly) { _ in store.save() }
-             .onChange(of: store.showYearly) { _ in store.save() }
-         }
-     }
- 
-     private func reminderStatusText() -> String {
-         guard store.reminderEnabled else {
-             return "Reminders are off."
-         }
+@@ -778,191 +779,262 @@ struct AdminView: View {
          if store.reminderTimes.isEmpty {
              return "Add at least one reminder time."
          }
          let times = store.reminderTimes
              .map { $0.time.formatted(date: .omitted, time: .shortened) }
              .joined(separator: ", ")
-+        if store.quietHoursEnabled {
-+            let quietStart = store.quietHoursStart.formatted(date: .omitted, time: .shortened)
-+            let quietEnd = store.quietHoursEnd.formatted(date: .omitted, time: .shortened)
-+            return "Reminders set for \(times). Quiet hours: \(quietStart)–\(quietEnd)."
-+        }
+         if store.quietHoursEnabled {
+             let quietStart = store.quietHoursStart.formatted(date: .omitted, time: .shortened)
+             let quietEnd = store.quietHoursEnd.formatted(date: .omitted, time: .shortened)
+             return "Reminders set for \(times). Quiet hours: \(quietStart)–\(quietEnd)."
+         }
          return "Reminders set for \(times)."
      }
  
@@ -418,9 +61,10 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
      @State private var showingCameraAlert = false
      @State private var cameraAlertMessage = ""
      @State private var isCounting: Bool = false
++    @State private var isCalibrated: Bool = false
 +    @State private var showCalibrationOverlay: Bool = true
++    @State private var pendingSaveCount: Int?
 +    @State private var showingSaveConfirmation: Bool = false
-+    @State private var pendingSaveCount: Int = 0
  
      var body: some View {
          ScrollView {
@@ -445,6 +89,7 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
 +                                statusText: $cameraStatus,
 +                                currentDistance: $cameraDistance,
 +                                isCounting: $isCounting,
++                                isCalibrated: $isCalibrated,
 +                                onPermissionResult: { message in
 +                                    cameraAlertMessage = message
 +                                    showingCameraAlert = true
@@ -454,23 +99,15 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
 +                            .clipShape(RoundedRectangle(cornerRadius: 16))
 +
 +                            if showCalibrationOverlay {
-+                                VStack(spacing: 12) {
-+                                    Text("Camera calibration")
-+                                        .font(.headline)
-+                                    Text("Position your face in the center and hold still until calibrated. Start counting once the status says you're ready.")
-+                                        .font(.caption)
-+                                        .multilineTextAlignment(.center)
-+                                        .foregroundColor(.secondary)
-+                                    Button("Got it") {
-+                                        showCalibrationOverlay = false
-+                                    }
-+                                    .buttonStyle(.borderedProminent)
-+                                }
-+                                .padding(16)
-+                                .frame(maxWidth: .infinity)
-+                                .background(.ultraThinMaterial)
-+                                .clipShape(RoundedRectangle(cornerRadius: 16))
-+                                .padding(.horizontal, 12)
++                                CalibrationOverlayView(
++                                    isCalibrated: isCalibrated,
++                                    hasFaceLock: cameraDistance != nil,
++                                    isCounting: isCounting,
++                                    statusText: cameraStatus,
++                                    onDismiss: { showCalibrationOverlay = false },
++                                    onReset: resetCalibration
++                                )
++                                .transition(.opacity)
                              }
 -                        )
 -                        .frame(height: 320)
@@ -504,31 +141,36 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
                              .buttonStyle(.borderedProminent)
  
                              Button("Stop counting") {
-                                 isCounting = false
-                                 if cameraCount > 0 {
+-                                isCounting = false
+-                                if cameraCount > 0 {
 -                                    store.addEntry(count: cameraCount)
-+                                    pendingSaveCount = cameraCount
-+                                    showingSaveConfirmation = true
-+                                } else {
-+                                    resetCameraSession()
-+                                    dismiss()
-                                 }
+-                                }
 -                                cameraCount = 0
 -                                cameraStatus = "Counting stopped."
 -                                cameraDistance = nil
 -                                NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
 -                                dismiss()
++                                stopCounting()
                              }
                              .buttonStyle(.bordered)
                          }
  
                          Button("Reset calibration") {
-                             cameraCount = 0
-                             cameraStatus = "Not calibrated"
-                             cameraDistance = nil
-                             NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
+-                            cameraCount = 0
+-                            cameraStatus = "Not calibrated"
+-                            cameraDistance = nil
+-                            NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
++                            resetCalibration()
                          }
                          .buttonStyle(.bordered)
++
++                        if !showCalibrationOverlay {
++                            Button("Show calibration tips") {
++                                showCalibrationOverlay = true
++                            }
++                            .font(.caption)
++                            .foregroundColor(.blue)
++                        }
                      }
                  }
              }
@@ -540,31 +182,55 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
          } message: {
              Text(cameraAlertMessage)
          }
-+        .alert("Save session?", isPresented: $showingSaveConfirmation) {
++        .alert("Save push-ups?", isPresented: $showingSaveConfirmation) {
 +            Button("Save") {
-+                store.addEntry(count: pendingSaveCount)
-+                resetCameraSession()
-+                dismiss()
++                finalizeStop(shouldSave: true)
 +            }
 +            Button("Discard", role: .destructive) {
-+                resetCameraSession()
-+                dismiss()
++                finalizeStop(shouldSave: false)
 +            }
 +        } message: {
-+            Text("Save \(pendingSaveCount) push-ups from this session?")
++            Text("Save \(pendingSaveCount ?? 0) push-ups to your log?")
 +        }
-+        .onChange(of: cameraStatus) { newValue in
-+            if newValue.lowercased().contains("calibrated") {
++        .onChange(of: isCalibrated) { newValue in
++            if newValue {
 +                showCalibrationOverlay = false
 +            }
 +        }
 +    }
 +
-+    private func resetCameraSession() {
++    private func stopCounting() {
++        isCounting = false
++        cameraStatus = "Counting stopped. Review your session."
++        guard cameraCount > 0 else {
++            resetCameraSession(shouldDismiss: true)
++            return
++        }
++        pendingSaveCount = cameraCount
++        showingSaveConfirmation = true
++    }
++
++    private func finalizeStop(shouldSave: Bool) {
++        if shouldSave, let count = pendingSaveCount, count > 0 {
++            store.addEntry(count: count)
++        }
++        resetCameraSession(shouldDismiss: true)
++        pendingSaveCount = nil
++    }
++
++    private func resetCalibration() {
 +        cameraCount = 0
-+        cameraStatus = "Counting stopped."
++        cameraStatus = "Not calibrated"
 +        cameraDistance = nil
++        isCalibrated = false
 +        NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
++    }
++
++    private func resetCameraSession(shouldDismiss: Bool) {
++        resetCalibration()
++        if shouldDismiss {
++            dismiss()
++        }
      }
  }
  
@@ -577,6 +243,7 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
      @Binding var statusText: String
      @Binding var currentDistance: Double?
      @Binding var isCounting: Bool
++    @Binding var isCalibrated: Bool
      let onPermissionResult: (String) -> Void
  
      func makeCoordinator() -> Coordinator {
@@ -585,6 +252,7 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
              statusText: $statusText,
              currentDistance: $currentDistance,
              isCounting: $isCounting,
++            isCalibrated: $isCalibrated,
              onPermissionResult: onPermissionResult
          )
      }
@@ -606,6 +274,7 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
          @Binding private var statusText: String
          @Binding private var currentDistance: Double?
          @Binding private var isCounting: Bool
++        @Binding private var isCalibrated: Bool
          private let onPermissionResult: (String) -> Void
          private var baselineDistance: Double?
          private var isNear: Bool = false
@@ -620,23 +289,24 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
              statusText: Binding<String>,
              currentDistance: Binding<Double?>,
              isCounting: Binding<Bool>,
++            isCalibrated: Binding<Bool>,
              onPermissionResult: @escaping (String) -> Void
          ) {
              _count = count
              _statusText = statusText
              _currentDistance = currentDistance
              _isCounting = isCounting
++            _isCalibrated = isCalibrated
              self.onPermissionResult = onPermissionResult
              super.init()
-+            feedbackGenerator.prepare()
              NotificationCenter.default.addObserver(self, selector: #selector(resetCalibration), name: .resetPushupCalibration, object: nil)
          }
  
-+        deinit {
-+            NotificationCenter.default.removeObserver(self, name: .resetPushupCalibration, object: nil)
-+            session?.pause()
-+        }
-+
+         deinit {
+             NotificationCenter.default.removeObserver(self, name: .resetPushupCalibration, object: nil)
+             session?.pause()
+         }
+ 
          func attachBlurOverlay(to view: ARSCNView) {
              sceneView = view
              let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
@@ -652,17 +322,24 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
          func startSession(on session: ARSession) {
              self.session = session
              guard ARFaceTrackingConfiguration.isSupported else {
-                 statusText = "Face tracking requires a TrueDepth camera."
-                 return
-             }
-             requestCameraAccessIfNeeded()
+@@ -1024,79 +1096,154 @@ struct CameraPushupCounterView: UIViewRepresentable {
+             let projected = sceneView.projectPoint(SCNVector3(position))
+             return CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
          }
  
-         private func requestCameraAccessIfNeeded() {
-             switch AVCaptureDevice.authorizationStatus(for: .video) {
-             case .authorized:
-                 runSession()
-@@ -970,50 +1092,51 @@ struct CameraPushupCounterView: UIViewRepresentable {
+         private func updateBlurMask(center: CGPoint, in bounds: CGRect) {
+             guard bounds.width > 0, bounds.height > 0 else { return }
+             let radius: CGFloat = 120
+             let path = UIBezierPath(rect: bounds)
+             let holeRect = CGRect(
+                 x: center.x - radius,
+                 y: center.y - radius,
+                 width: radius * 2,
+                 height: radius * 2
+             )
+             path.append(UIBezierPath(ovalIn: holeRect))
+             maskLayer.frame = bounds
+             maskLayer.path = path.cgPath
          }
  
          private func handleDistance(_ distance: Double) {
@@ -671,6 +348,7 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
  
              if baselineDistance == nil {
                  baselineDistance = distance
++                isCalibrated = true
                  statusText = "Calibrated at \(String(format: "%.2f", distance)) m. Begin push-ups."
                  return
              }
@@ -688,19 +366,92 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
              } else if distance >= baselineDistance - toleranceMeters && isNear {
                  isNear = false
                  count += 1
-+                feedbackGenerator.notificationOccurred(.success)
                  statusText = "Up position detected. Push-up counted."
++                feedbackGenerator.notificationOccurred(.success)
              }
          }
  
          @objc private func resetCalibration() {
              baselineDistance = nil
              isNear = false
++            isCalibrated = false
              statusText = "Not calibrated"
          }
      }
  }
  
++struct CalibrationOverlayView: View {
++    let isCalibrated: Bool
++    let hasFaceLock: Bool
++    let isCounting: Bool
++    let statusText: String
++    let onDismiss: () -> Void
++    let onReset: () -> Void
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 12) {
++            HStack {
++                Text("Camera calibration")
++                    .font(.headline)
++                Spacer()
++                Button("Dismiss") {
++                    onDismiss()
++                }
++                .font(.caption)
++            }
++
++            Text("Follow these steps before starting your set.")
++                .font(.caption)
++                .foregroundColor(.secondary)
++
++            VStack(alignment: .leading, spacing: 8) {
++                overlayStep(
++                    title: "Keep your face centered in the frame.",
++                    isComplete: hasFaceLock
++                )
++                overlayStep(
++                    title: "Hold still to calibrate your starting distance.",
++                    isComplete: isCalibrated
++                )
++                overlayStep(
++                    title: "Tap Start counting when ready.",
++                    isComplete: isCounting
++                )
++            }
++
++            Text(statusText)
++                .font(.caption2)
++                .foregroundColor(.secondary)
++
++            HStack {
++                Button("Reset calibration") {
++                    onReset()
++                }
++                .buttonStyle(.bordered)
++                Spacer()
++                Button("Got it") {
++                    onDismiss()
++                }
++                .buttonStyle(.borderedProminent)
++            }
++        }
++        .padding()
++        .frame(maxWidth: .infinity)
++        .background(.ultraThinMaterial)
++        .cornerRadius(16)
++        .padding(12)
++    }
++
++    private func overlayStep(title: String, isComplete: Bool) -> some View {
++        HStack(spacing: 8) {
++            Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
++                .foregroundColor(isComplete ? .green : .secondary)
++            Text(title)
++                .font(.caption)
++        }
++    }
++}
++
  struct StatCard: View {
      let title: String
      let value: String
@@ -714,112 +465,18 @@ index 8e5b855e4a2dc1aad8cae5775c66754b9702bf26..dadbbef94445cb21b3774f243a06a601
              Text(value)
                  .font(.title3)
                  .fontWeight(.semibold)
-@@ -1098,59 +1221,96 @@ struct LineChart: View {
-                 Path { path in
-                     guard let first = points.first else { return }
-                     path.move(to: first)
-                     for point in points.dropFirst() {
-                         path.addLine(to: point)
-                     }
-                 }
-                 .stroke(Color.blue, lineWidth: 2)
- 
-                 ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                     Circle()
-                         .fill(Color.blue)
-                         .frame(width: 6, height: 6)
-                         .position(point)
-                 }
-             }
+             Text(subtitle)
+                 .font(.caption2)
+                 .foregroundColor(.secondary)
          }
-         .frame(height: 180)
+         .padding()
+         .frame(maxWidth: .infinity, alignment: .leading)
+         .background(Color.blueSteel.opacity(0.15))
+         .cornerRadius(16)
      }
  }
  
- enum NotificationScheduler {
-     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
-         let center = UNUserNotificationCenter.current()
-         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
--            DispatchQueue.main.async {
--                if !granted {
--                    completion(false)
--                    return
--                }
--                let identifiers = store.reminderTimes.indices.map { "pushup-reminder-\($0)" }
-+            guard granted else {
-+                DispatchQueue.main.async { completion(false) }
-+                return
-+            }
-+            center.getPendingNotificationRequests { requests in
-+                let identifiers = requests
-+                    .map(\.identifier)
-+                    .filter { $0.hasPrefix("pushup-reminder-") }
-                 center.removePendingNotificationRequests(withIdentifiers: identifiers)
-                 guard store.reminderEnabled, !store.reminderTimes.isEmpty else {
--                    completion(true)
-+                    DispatchQueue.main.async { completion(true) }
-                     return
-                 }
--                for (index, reminder) in store.reminderTimes.enumerated() {
-+                guard store.total(for: Date()) < store.dailyTargetTotal() else {
-+                    DispatchQueue.main.async { completion(true) }
-+                    return
-+                }
-+                let reminders = filteredReminders(store: store)
-+                guard !reminders.isEmpty else {
-+                    DispatchQueue.main.async { completion(true) }
-+                    return
-+                }
-+                for (index, reminder) in reminders.enumerated() {
-                     let content = UNMutableNotificationContent()
-                     content.title = "Push-up Manager reminder"
-                     content.body = "Log your push-ups to stay on target today."
- 
-                     let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.time)
-                     let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-                     let request = UNNotificationRequest(
-                         identifier: "pushup-reminder-\(index)",
-                         content: content,
-                         trigger: trigger
-                     )
-                     center.add(request)
-                 }
--                completion(true)
-+                DispatchQueue.main.async { completion(true) }
-             }
-         }
-     }
-+
-+    private static func filteredReminders(store: PushupStore) -> [ReminderTime] {
-+        guard store.quietHoursEnabled else { return store.reminderTimes }
-+        return store.reminderTimes.filter { reminder in
-+            !isInQuietHours(time: reminder.time, start: store.quietHoursStart, end: store.quietHoursEnd)
-+        }
-+    }
-+
-+    private static func isInQuietHours(time: Date, start: Date, end: Date) -> Bool {
-+        let calendar = Calendar.current
-+        let timeMinutes = minutesSinceMidnight(for: time, calendar: calendar)
-+        let startMinutes = minutesSinceMidnight(for: start, calendar: calendar)
-+        let endMinutes = minutesSinceMidnight(for: end, calendar: calendar)
-+        if startMinutes == endMinutes {
-+            return true
-+        }
-+        if startMinutes < endMinutes {
-+            return timeMinutes >= startMinutes && timeMinutes < endMinutes
-+        }
-+        return timeMinutes >= startMinutes || timeMinutes < endMinutes
-+    }
-+
-+    private static func minutesSinceMidnight(for date: Date, calendar: Calendar) -> Int {
-+        let components = calendar.dateComponents([.hour, .minute], from: date)
-+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
-+    }
- }
- 
- extension Color {
-     static let blueSteel = Color(red: 0.27, green: 0.46, blue: 0.60)
- }
+ struct SectionCard<Content: View>: View {
  
 EOF
 )

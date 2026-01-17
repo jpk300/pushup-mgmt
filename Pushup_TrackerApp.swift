@@ -3,6 +3,7 @@ import Combine
 import UserNotifications
 import ARKit
 import AVFoundation
+import UIKit
 
 @main
 struct PushManagerApp: App {
@@ -800,6 +801,10 @@ struct CameraView: View {
     @State private var showingCameraAlert = false
     @State private var cameraAlertMessage = ""
     @State private var isCounting: Bool = false
+    @State private var isCalibrated: Bool = false
+    @State private var showCalibrationOverlay: Bool = true
+    @State private var pendingSaveCount: Int?
+    @State private var showingSaveConfirmation: Bool = false
 
     var body: some View {
         ScrollView {
@@ -810,18 +815,33 @@ struct CameraView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
-                        CameraPushupCounterView(
-                            count: $cameraCount,
-                            statusText: $cameraStatus,
-                            currentDistance: $cameraDistance,
-                            isCounting: $isCounting,
-                            onPermissionResult: { message in
-                                cameraAlertMessage = message
-                                showingCameraAlert = true
+                        ZStack {
+                            CameraPushupCounterView(
+                                count: $cameraCount,
+                                statusText: $cameraStatus,
+                                currentDistance: $cameraDistance,
+                                isCounting: $isCounting,
+                                isCalibrated: $isCalibrated,
+                                onPermissionResult: { message in
+                                    cameraAlertMessage = message
+                                    showingCameraAlert = true
+                                }
+                            )
+                            .frame(height: 320)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                            if showCalibrationOverlay {
+                                CalibrationOverlayView(
+                                    isCalibrated: isCalibrated,
+                                    hasFaceLock: cameraDistance != nil,
+                                    isCounting: isCounting,
+                                    statusText: cameraStatus,
+                                    onDismiss: { showCalibrationOverlay = false },
+                                    onReset: resetCalibration
+                                )
+                                .transition(.opacity)
                             }
-                        )
-                        .frame(height: 320)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Push-ups counted")
@@ -850,26 +870,23 @@ struct CameraView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button("Stop counting") {
-                                isCounting = false
-                                if cameraCount > 0 {
-                                    store.addEntry(count: cameraCount)
-                                }
-                                cameraCount = 0
-                                cameraStatus = "Counting stopped."
-                                cameraDistance = nil
-                                NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
-                                dismiss()
+                                stopCounting()
                             }
                             .buttonStyle(.bordered)
                         }
 
                         Button("Reset calibration") {
-                            cameraCount = 0
-                            cameraStatus = "Not calibrated"
-                            cameraDistance = nil
-                            NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
+                            resetCalibration()
                         }
                         .buttonStyle(.bordered)
+
+                        if !showCalibrationOverlay {
+                            Button("Show calibration tips") {
+                                showCalibrationOverlay = true
+                            }
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                        }
                     }
                 }
             }
@@ -880,6 +897,55 @@ struct CameraView: View {
             Button("OK") { }
         } message: {
             Text(cameraAlertMessage)
+        }
+        .alert("Save push-ups?", isPresented: $showingSaveConfirmation) {
+            Button("Save") {
+                finalizeStop(shouldSave: true)
+            }
+            Button("Discard", role: .destructive) {
+                finalizeStop(shouldSave: false)
+            }
+        } message: {
+            Text("Save \(pendingSaveCount ?? 0) push-ups to your log?")
+        }
+        .onChange(of: isCalibrated) { newValue in
+            if newValue {
+                showCalibrationOverlay = false
+            }
+        }
+    }
+
+    private func stopCounting() {
+        isCounting = false
+        cameraStatus = "Counting stopped. Review your session."
+        guard cameraCount > 0 else {
+            resetCameraSession(shouldDismiss: true)
+            return
+        }
+        pendingSaveCount = cameraCount
+        showingSaveConfirmation = true
+    }
+
+    private func finalizeStop(shouldSave: Bool) {
+        if shouldSave, let count = pendingSaveCount, count > 0 {
+            store.addEntry(count: count)
+        }
+        resetCameraSession(shouldDismiss: true)
+        pendingSaveCount = nil
+    }
+
+    private func resetCalibration() {
+        cameraCount = 0
+        cameraStatus = "Not calibrated"
+        cameraDistance = nil
+        isCalibrated = false
+        NotificationCenter.default.post(name: .resetPushupCalibration, object: nil)
+    }
+
+    private func resetCameraSession(shouldDismiss: Bool) {
+        resetCalibration()
+        if shouldDismiss {
+            dismiss()
         }
     }
 }
@@ -893,6 +959,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
     @Binding var statusText: String
     @Binding var currentDistance: Double?
     @Binding var isCounting: Bool
+    @Binding var isCalibrated: Bool
     let onPermissionResult: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -901,6 +968,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             statusText: $statusText,
             currentDistance: $currentDistance,
             isCounting: $isCounting,
+            isCalibrated: $isCalibrated,
             onPermissionResult: onPermissionResult
         )
     }
@@ -922,6 +990,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
         @Binding private var statusText: String
         @Binding private var currentDistance: Double?
         @Binding private var isCounting: Bool
+        @Binding private var isCalibrated: Bool
         private let onPermissionResult: (String) -> Void
         private var baselineDistance: Double?
         private var isNear: Bool = false
@@ -929,18 +998,21 @@ struct CameraPushupCounterView: UIViewRepresentable {
         private weak var sceneView: ARSCNView?
         private weak var blurView: UIVisualEffectView?
         private let maskLayer = CAShapeLayer()
+        private let feedbackGenerator = UINotificationFeedbackGenerator()
 
         init(
             count: Binding<Int>,
             statusText: Binding<String>,
             currentDistance: Binding<Double?>,
             isCounting: Binding<Bool>,
+            isCalibrated: Binding<Bool>,
             onPermissionResult: @escaping (String) -> Void
         ) {
             _count = count
             _statusText = statusText
             _currentDistance = currentDistance
             _isCounting = isCounting
+            _isCalibrated = isCalibrated
             self.onPermissionResult = onPermissionResult
             super.init()
             NotificationCenter.default.addObserver(self, selector: #selector(resetCalibration), name: .resetPushupCalibration, object: nil)
@@ -1046,6 +1118,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
 
             if baselineDistance == nil {
                 baselineDistance = distance
+                isCalibrated = true
                 statusText = "Calibrated at \(String(format: "%.2f", distance)) m. Begin push-ups."
                 return
             }
@@ -1064,13 +1137,87 @@ struct CameraPushupCounterView: UIViewRepresentable {
                 isNear = false
                 count += 1
                 statusText = "Up position detected. Push-up counted."
+                feedbackGenerator.notificationOccurred(.success)
             }
         }
 
         @objc private func resetCalibration() {
             baselineDistance = nil
             isNear = false
+            isCalibrated = false
             statusText = "Not calibrated"
+        }
+    }
+}
+
+struct CalibrationOverlayView: View {
+    let isCalibrated: Bool
+    let hasFaceLock: Bool
+    let isCounting: Bool
+    let statusText: String
+    let onDismiss: () -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Camera calibration")
+                    .font(.headline)
+                Spacer()
+                Button("Dismiss") {
+                    onDismiss()
+                }
+                .font(.caption)
+            }
+
+            Text("Follow these steps before starting your set.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                overlayStep(
+                    title: "Keep your face centered in the frame.",
+                    isComplete: hasFaceLock
+                )
+                overlayStep(
+                    title: "Hold still to calibrate your starting distance.",
+                    isComplete: isCalibrated
+                )
+                overlayStep(
+                    title: "Tap Start counting when ready.",
+                    isComplete: isCounting
+                )
+            }
+
+            Text(statusText)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            HStack {
+                Button("Reset calibration") {
+                    onReset()
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button("Got it") {
+                    onDismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .padding(12)
+    }
+
+    private func overlayStep(title: String, isComplete: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(isComplete ? .green : .secondary)
+            Text(title)
+                .font(.caption)
         }
     }
 }
