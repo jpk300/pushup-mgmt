@@ -351,10 +351,10 @@ struct PushManagerView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Push Up Tracker")
+            .navigationTitle("Push-Up Tracker")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    NavigationLink("Pushup Camera") {
+                    NavigationLink("Push-up Camera") {
                         CameraView()
                     }
                     .foregroundColor(.blue)
@@ -372,7 +372,7 @@ struct PushManagerView: View {
 
     private var heroSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Stay on track with daily pushups.")
+            Text("Stay on track with daily push-ups.")
                 .font(.title2)
                 .fontWeight(.semibold)
             HStack(spacing: 16) {
@@ -384,10 +384,10 @@ struct PushManagerView: View {
     }
 
     private var logSection: some View {
-        SectionCard(title: "Log pushups") {
+        SectionCard(title: "Log push-ups") {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    TextField("Pushups completed", text: $logCount)
+                    TextField("Push-ups completed", text: $logCount)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .focused($isLogFieldFocused)
@@ -415,7 +415,7 @@ struct PushManagerView: View {
                     } else {
                         ForEach(todaysEntries.reversed()) { entry in
                             HStack {
-                                Text("\(entry.count) pushups")
+                                Text("\(entry.count) push-ups")
                                 Spacer()
                                 Text(entry.timestamp, style: .time)
                                     .foregroundColor(.secondary)
@@ -446,7 +446,7 @@ struct PushManagerView: View {
             NavigationView {
                 Form {
                     Section(header: Text("Update set")) {
-                        TextField("Pushups", text: $editCount)
+                        TextField("Push-ups", text: $editCount)
                             .keyboardType(.numberPad)
                     }
                     Section {
@@ -568,11 +568,11 @@ struct AdminView: View {
 
                 if store.targetType == .dailyTotal {
                     Stepper(value: $store.dailyTarget, in: 1...1000) {
-                        Text("Daily pushup target: \(store.dailyTarget)")
+                        Text("Daily push-up target: \(store.dailyTarget)")
                     }
                 } else {
                     Stepper(value: $store.incrementSize, in: 1...200) {
-                        Text("Pushups per set: \(store.incrementSize)")
+                        Text("Push-ups per set: \(store.incrementSize)")
                     }
                     Stepper(value: $store.setsPerDay, in: 1...50) {
                         Text("Sets per day: \(store.setsPerDay)")
@@ -594,7 +594,7 @@ struct AdminView: View {
                         .foregroundColor(.orange)
                         .font(.title2)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Pushup reminders")
+                        Text("Push-up reminders")
                             .font(.headline)
                         Text("Get nudges if you are behind on your daily target.")
                             .font(.caption)
@@ -724,9 +724,9 @@ struct CameraView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                SectionCard(title: "Camera pushup counter") {
+                SectionCard(title: "Camera push-up counter") {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Use the iPhone TrueDepth camera to estimate face distance for pushup counting.")
+                        Text("Use the iPhone TrueDepth camera to estimate face distance for push-up counting.")
                             .font(.caption)
                             .foregroundColor(.secondary)
 
@@ -744,7 +744,7 @@ struct CameraView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Pushups counted")
+                            Text("Push-ups counted")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text("\(cameraCount)")
@@ -795,7 +795,7 @@ struct CameraView: View {
             }
             .padding()
         }
-        .navigationTitle("Pushup Camera")
+        .navigationTitle("Push-up Camera")
         .alert("Camera access", isPresented: $showingCameraAlert) {
             Button("OK") { }
         } message: {
@@ -961,7 +961,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
 
             if baselineDistance == nil {
                 baselineDistance = distance
-                statusText = "Calibrated at \(String(format: "%.2f", distance)) m. Begin pushups."
+                statusText = "Calibrated at \(String(format: "%.2f", distance)) m. Begin push-ups."
                 return
             }
 
@@ -978,7 +978,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             } else if distance >= baselineDistance - toleranceMeters && isNear {
                 isNear = false
                 count += 1
-                statusText = "Up position detected. Pushup counted."
+                statusText = "Up position detected. Push-up counted."
             }
         }
 
@@ -1118,8 +1118,8 @@ enum NotificationScheduler {
                 }
                 for (index, time) in store.reminderTimes.enumerated() {
                     let content = UNMutableNotificationContent()
-                    content.title = "Push Manager reminder"
-                    content.body = "Log your pushups to stay on target today."
+                    content.title = "Push-up Manager reminder"
+                    content.body = "Log your push-ups to stay on target today."
 
                     let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: time)
                     let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
