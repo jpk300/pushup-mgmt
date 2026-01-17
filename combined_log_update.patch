@@ -1,0 +1,33 @@
+(cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'PATCH'
+diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
+index fbfdc06..1f2f2e8 100644
+--- a/Pushup_TrackerApp.swift
++++ b/Pushup_TrackerApp.swift
+@@ -504,12 +504,6 @@ struct PushManagerView: View {
+             }
+             .navigationTitle("Push-Up Tracker")
+             .toolbar {
+-                ToolbarItem(placement: .navigationBarLeading) {
+-                    NavigationLink("Push-up Camera") {
+-                        CameraView()
+-                    }
+-                    .foregroundColor(.blue)
+-                }
+                 ToolbarItem(placement: .navigationBarTrailing) {
+                     NavigationLink("Settings") {
+                         AdminView()
+@@ -537,6 +531,12 @@ struct PushManagerView: View {
+     private var logSection: some View {
+         SectionCard(title: "Log push-ups") {
+             VStack(alignment: .leading, spacing: 16) {
++                NavigationLink("Log with camera") {
++                    CameraView()
++                        .environmentObject(store)
++                }
++                .buttonStyle(.borderedProminent)
++
+                 HStack {
+                     TextField("Push-ups completed", text: $logCount)
+                         .keyboardType(.numberPad)
+PATCH
+)

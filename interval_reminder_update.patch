@@ -1,0 +1,480 @@
+(cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'PATCH'
+diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
+index 7f98692..fbfdc06 100644
+--- a/Pushup_TrackerApp.swift
++++ b/Pushup_TrackerApp.swift
+@@ -34,6 +34,12 @@ final class PushupStore: ObservableObject {
+     }
+     @Published var reminderEnabled: Bool = false
+     @Published var reminderTimes: [ReminderTime] = [ReminderTime(time: PushupStore.defaultReminderTime())]
++    @Published var useIntervalReminders: Bool = false
++    @Published var reminderIntervalHours: Int = 2
++    @Published var onlyRemindIfBehind: Bool = false
++    @Published var behindThresholdType: BehindThresholdType = .percent
++    @Published var behindThresholdValue: Int = 25
++    @Published var reminderStartTime: Date = PushupStore.defaultReminderStartTime()
+     @Published var quietHoursEnabled: Bool = false
+     @Published var quietHoursStart: Date = PushupStore.defaultQuietHoursStart()
+     @Published var quietHoursEnd: Date = PushupStore.defaultQuietHoursEnd()
+@@ -56,6 +62,10 @@ final class PushupStore: ObservableObject {
+         Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date()) ?? Date()
+     }
+ 
++    static func defaultReminderStartTime() -> Date {
++        Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
++    }
++
+     func dailyTargetTotal() -> Int {
+         targetType == .incremental ? incrementSize * setsPerDay : dailyTarget
+     }
+@@ -148,6 +158,12 @@ final class PushupStore: ObservableObject {
+             entries: entries,
+             reminderEnabled: reminderEnabled,
+             reminderTimes: reminderTimes,
++            useIntervalReminders: useIntervalReminders,
++            reminderIntervalHours: reminderIntervalHours,
++            onlyRemindIfBehind: onlyRemindIfBehind,
++            behindThresholdType: behindThresholdType,
++            behindThresholdValue: behindThresholdValue,
++            reminderStartTime: reminderStartTime,
+             quietHoursEnabled: quietHoursEnabled,
+             quietHoursStart: quietHoursStart,
+             quietHoursEnd: quietHoursEnd,
+@@ -172,6 +188,12 @@ final class PushupStore: ObservableObject {
+         entries = payload.entries
+         reminderEnabled = payload.reminderEnabled
+         reminderTimes = payload.reminderTimes
++        useIntervalReminders = payload.useIntervalReminders
++        reminderIntervalHours = payload.reminderIntervalHours
++        onlyRemindIfBehind = payload.onlyRemindIfBehind
++        behindThresholdType = payload.behindThresholdType
++        behindThresholdValue = payload.behindThresholdValue
++        reminderStartTime = payload.reminderStartTime
+         quietHoursEnabled = payload.quietHoursEnabled
+         quietHoursStart = payload.quietHoursStart
+         quietHoursEnd = payload.quietHoursEnd
+@@ -211,6 +233,12 @@ struct StorePayload: Codable {
+     var entries: [PushupEntry]
+     var reminderEnabled: Bool
+     var reminderTimes: [ReminderTime]
++    var useIntervalReminders: Bool
++    var reminderIntervalHours: Int
++    var onlyRemindIfBehind: Bool
++    var behindThresholdType: BehindThresholdType
++    var behindThresholdValue: Int
++    var reminderStartTime: Date
+     var quietHoursEnabled: Bool
+     var quietHoursStart: Date
+     var quietHoursEnd: Date
+@@ -226,6 +254,12 @@ struct StorePayload: Codable {
+         entries: [PushupEntry],
+         reminderEnabled: Bool,
+         reminderTimes: [ReminderTime],
++        useIntervalReminders: Bool,
++        reminderIntervalHours: Int,
++        onlyRemindIfBehind: Bool,
++        behindThresholdType: BehindThresholdType,
++        behindThresholdValue: Int,
++        reminderStartTime: Date,
+         quietHoursEnabled: Bool,
+         quietHoursStart: Date,
+         quietHoursEnd: Date,
+@@ -240,6 +274,12 @@ struct StorePayload: Codable {
+         self.entries = entries
+         self.reminderEnabled = reminderEnabled
+         self.reminderTimes = reminderTimes
++        self.useIntervalReminders = useIntervalReminders
++        self.reminderIntervalHours = reminderIntervalHours
++        self.onlyRemindIfBehind = onlyRemindIfBehind
++        self.behindThresholdType = behindThresholdType
++        self.behindThresholdValue = behindThresholdValue
++        self.reminderStartTime = reminderStartTime
+         self.quietHoursEnabled = quietHoursEnabled
+         self.quietHoursStart = quietHoursStart
+         self.quietHoursEnd = quietHoursEnd
+@@ -256,6 +296,12 @@ struct StorePayload: Codable {
+         setsPerDay = try container.decode(Int.self, forKey: .setsPerDay)
+         entries = try container.decode([PushupEntry].self, forKey: .entries)
+         reminderEnabled = try container.decode(Bool.self, forKey: .reminderEnabled)
++        useIntervalReminders = (try? container.decode(Bool.self, forKey: .useIntervalReminders)) ?? false
++        reminderIntervalHours = (try? container.decode(Int.self, forKey: .reminderIntervalHours)) ?? 2
++        onlyRemindIfBehind = (try? container.decode(Bool.self, forKey: .onlyRemindIfBehind)) ?? false
++        behindThresholdType = (try? container.decode(BehindThresholdType.self, forKey: .behindThresholdType)) ?? .percent
++        behindThresholdValue = (try? container.decode(Int.self, forKey: .behindThresholdValue)) ?? 25
++        reminderStartTime = (try? container.decode(Date.self, forKey: .reminderStartTime)) ?? PushupStore.defaultReminderStartTime()
+         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
+         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
+         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
+@@ -280,6 +326,12 @@ struct StorePayload: Codable {
+         try container.encode(entries, forKey: .entries)
+         try container.encode(reminderEnabled, forKey: .reminderEnabled)
+         try container.encode(reminderTimes, forKey: .reminderTimes)
++        try container.encode(useIntervalReminders, forKey: .useIntervalReminders)
++        try container.encode(reminderIntervalHours, forKey: .reminderIntervalHours)
++        try container.encode(onlyRemindIfBehind, forKey: .onlyRemindIfBehind)
++        try container.encode(behindThresholdType, forKey: .behindThresholdType)
++        try container.encode(behindThresholdValue, forKey: .behindThresholdValue)
++        try container.encode(reminderStartTime, forKey: .reminderStartTime)
+         try container.encode(quietHoursEnabled, forKey: .quietHoursEnabled)
+         try container.encode(quietHoursStart, forKey: .quietHoursStart)
+         try container.encode(quietHoursEnd, forKey: .quietHoursEnd)
+@@ -297,6 +349,12 @@ struct StorePayload: Codable {
+         case reminderEnabled
+         case reminderTimes
+         case reminderTime
++        case useIntervalReminders
++        case reminderIntervalHours
++        case onlyRemindIfBehind
++        case behindThresholdType
++        case behindThresholdValue
++        case reminderStartTime
+         case quietHoursEnabled
+         case quietHoursStart
+         case quietHoursEnd
+@@ -356,6 +414,22 @@ enum TargetType: String, CaseIterable, Codable, Identifiable {
+     }
+ }
+ 
++enum BehindThresholdType: String, CaseIterable, Codable, Identifiable {
++    case percent
++    case count
++
++    var id: String { rawValue }
++
++    var label: String {
++        switch self {
++        case .percent:
++            return "Percent of target"
++        case .count:
++            return "Push-up count"
++        }
++    }
++}
++
+ enum RangeOption: String, CaseIterable, Identifiable {
+     case daily
+     case weekly
+@@ -714,33 +788,87 @@ struct AdminView: View {
+ 
+                 if store.reminderEnabled {
+                     VStack(alignment: .leading, spacing: 12) {
+-                        Text("Reminder times")
+-                            .font(.subheadline)
+-                            .fontWeight(.semibold)
+-                        ForEach(store.reminderTimes.indices, id: \.self) { index in
+-                            HStack {
+-                                DatePicker(
+-                                    "Reminder",
+-                                    selection: $store.reminderTimes[index].time,
+-                                    displayedComponents: .hourAndMinute
+-                                )
+-                                Button("Remove") {
+-                                    store.removeReminderTime(at: index)
++                        Toggle("Use interval reminders", isOn: $store.useIntervalReminders)
++                        Text("Switch to a cadence if you prefer reminders every few hours instead of fixed times.")
++                            .font(.caption)
++                            .foregroundColor(.secondary)
++
++                        if store.useIntervalReminders {
++                            Stepper(value: $store.reminderIntervalHours, in: 1...12) {
++                                Text("Repeat every \(store.reminderIntervalHours) hour\(store.reminderIntervalHours == 1 ? "" : "s")")
++                            }
++                            Button("Every 2 hours preset") {
++                                store.useIntervalReminders = true
++                                store.reminderIntervalHours = 2
++                                store.save()
++                            }
++                            .buttonStyle(.bordered)
++                        } else {
++                            Text("Reminder times")
++                                .font(.subheadline)
++                                .fontWeight(.semibold)
++                            HStack(spacing: 8) {
++                                Button("3x/day") {
++                                    setReminderTimes([
++                                        reminderTime(hour: 9, minute: 0),
++                                        reminderTime(hour: 13, minute: 0),
++                                        reminderTime(hour: 18, minute: 0)
++                                    ])
+                                 }
+-                                .buttonStyle(.borderless)
++                                .buttonStyle(.bordered)
++                                Button("Morning only") {
++                                    setReminderTimes([reminderTime(hour: 9, minute: 0)])
++                                }
++                                .buttonStyle(.bordered)
+                             }
+-                        }
+ 
+-                        HStack {
+-                            DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
+-                            Button("Add time") {
+-                                store.addReminderTime(newReminderTime)
++                            ForEach(store.reminderTimes.indices, id: \.self) { index in
++                                HStack {
++                                    DatePicker(
++                                        "Reminder",
++                                        selection: $store.reminderTimes[index].time,
++                                        displayedComponents: .hourAndMinute
++                                    )
++                                    Button("Remove") {
++                                        store.removeReminderTime(at: index)
++                                    }
++                                    .buttonStyle(.borderless)
++                                }
++                            }
++
++                            HStack {
++                                DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
++                                Button("Add time") {
++                                    store.addReminderTime(newReminderTime)
++                                }
++                                .buttonStyle(.bordered)
+                             }
+-                            .buttonStyle(.bordered)
+                         }
+                     }
+ 
+                     VStack(alignment: .leading, spacing: 12) {
++                        Toggle("Only remind if behind", isOn: $store.onlyRemindIfBehind)
++                        if store.onlyRemindIfBehind {
++                            Picker("Behind by", selection: $store.behindThresholdType) {
++                                ForEach(BehindThresholdType.allCases) { type in
++                                    Text(type.label).tag(type)
++                                }
++                            }
++                            .pickerStyle(.segmented)
++
++                            if store.behindThresholdType == .percent {
++                                Stepper(value: $store.behindThresholdValue, in: 5...100, step: 5) {
++                                    Text("Behind by \(store.behindThresholdValue)% of target")
++                                }
++                            } else {
++                                Stepper(value: $store.behindThresholdValue, in: 1...1000) {
++                                    Text("Behind by \(store.behindThresholdValue) push-ups")
++                                }
++                            }
++                        }
++
++                        DatePicker("Start reminding after", selection: $store.reminderStartTime, displayedComponents: .hourAndMinute)
++
+                         Toggle("Enable quiet hours", isOn: $store.quietHoursEnabled)
+                         if store.quietHoursEnabled {
+                             HStack {
+@@ -795,6 +923,36 @@ struct AdminView: View {
+                     store.save()
+                 }
+             }
++            .onChange(of: store.useIntervalReminders) { _ in
++                NotificationScheduler.updateReminder(store: store) { _ in
++                    store.save()
++                }
++            }
++            .onChange(of: store.reminderIntervalHours) { _ in
++                NotificationScheduler.updateReminder(store: store) { _ in
++                    store.save()
++                }
++            }
++            .onChange(of: store.onlyRemindIfBehind) { _ in
++                NotificationScheduler.updateReminder(store: store) { _ in
++                    store.save()
++                }
++            }
++            .onChange(of: store.behindThresholdType) { _ in
++                NotificationScheduler.updateReminder(store: store) { _ in
++                    store.save()
++                }
++            }
++            .onChange(of: store.behindThresholdValue) { _ in
++                NotificationScheduler.updateReminder(store: store) { _ in
++                    store.save()
++                }
++            }
++            .onChange(of: store.reminderStartTime) { _ in
++                NotificationScheduler.updateReminder(store: store) { _ in
++                    store.save()
++                }
++            }
+             .onChange(of: store.quietHoursStart) { _ in
+                 NotificationScheduler.updateReminder(store: store) { _ in
+                     store.save()
+@@ -828,18 +986,52 @@ struct AdminView: View {
+         guard store.reminderEnabled else {
+             return "Reminders are off."
+         }
+-        if store.reminderTimes.isEmpty {
+-            return "Add at least one reminder time."
++        if store.total(for: Date()) >= store.dailyTargetTotal() {
++            return "Reminders paused: target already met."
++        }
++        let schedule = NotificationScheduler.reminderSchedule(store: store)
++        if schedule.all.isEmpty {
++            return store.useIntervalReminders ? "Choose an interval to start reminders." : "Add at least one reminder time."
+         }
+-        let times = store.reminderTimes
++        if schedule.filtered.isEmpty {
++            let startSummary = "Start after \(store.reminderStartTime.formatted(DateFormats.reminderTime))"
++            let behindSummary = reminderBehindSummary()
++            return "All reminders are suppressed by quiet hours. \(startSummary)\(behindSummary)"
++        }
++        let times = schedule.filtered
+             .map { $0.time.formatted(DateFormats.reminderTime) }
+             .joined(separator: ", ")
++        let suppressedCount = schedule.all.count - schedule.filtered.count
++        let behindSummary = reminderBehindSummary()
++        let startSummary = "Start after \(store.reminderStartTime.formatted(DateFormats.reminderTime))"
+         if store.quietHoursEnabled {
+             let quietStart = store.quietHoursStart.formatted(DateFormats.reminderTime)
+             let quietEnd = store.quietHoursEnd.formatted(DateFormats.reminderTime)
+-            return "Reminders set for \(times). Quiet hours: \(quietStart)–\(quietEnd)."
++            let suppressionText = suppressedCount > 0 ? " \(suppressedCount) reminder\(suppressedCount == 1 ? "" : "s") suppressed by quiet hours." : ""
++            return "Reminders set for \(times). Quiet hours: \(quietStart)–\(quietEnd).\(suppressionText) \(startSummary)\(behindSummary)"
++        }
++        let suppressionText = suppressedCount > 0 ? " \(suppressedCount) reminder\(suppressedCount == 1 ? "" : "s") suppressed by quiet hours." : ""
++        return "Reminders set for \(times).\(suppressionText) \(startSummary)\(behindSummary)"
++    }
++
++    private func reminderBehindSummary() -> String {
++        guard store.onlyRemindIfBehind else { return "" }
++        switch store.behindThresholdType {
++        case .percent:
++            return " Only if below \(store.behindThresholdValue)% of target."
++        case .count:
++            return " Only if below \(store.behindThresholdValue) push-ups."
+         }
+-        return "Reminders set for \(times)."
++    }
++
++    private func setReminderTimes(_ times: [Date]) {
++        store.useIntervalReminders = false
++        store.reminderTimes = times.map { ReminderTime(time: $0) }.sorted { $0.time < $1.time }
++        store.save()
++    }
++
++    private func reminderTime(hour: Int, minute: Int) -> Date {
++        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
+     }
+ 
+ }
+@@ -1407,6 +1599,11 @@ enum DateFormats {
+ }
+ 
+ enum NotificationScheduler {
++    struct ReminderSchedule {
++        let all: [ReminderTime]
++        let filtered: [ReminderTime]
++    }
++
+     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
+         let center = UNUserNotificationCenter.current()
+         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+@@ -1419,7 +1616,8 @@ enum NotificationScheduler {
+                     .map(\.identifier)
+                     .filter { $0.hasPrefix("pushup-reminder-") }
+                 center.removePendingNotificationRequests(withIdentifiers: identifiers)
+-                guard store.reminderEnabled, !store.reminderTimes.isEmpty else {
++                guard store.reminderEnabled,
++                      store.useIntervalReminders || !store.reminderTimes.isEmpty else {
+                     DispatchQueue.main.async { completion(true) }
+                     return
+                 }
+@@ -1427,12 +1625,16 @@ enum NotificationScheduler {
+                     DispatchQueue.main.async { completion(true) }
+                     return
+                 }
+-                let reminders = filteredReminders(store: store)
+-                guard !reminders.isEmpty else {
++                guard shouldScheduleBasedOnProgress(store: store) else {
++                    DispatchQueue.main.async { completion(true) }
++                    return
++                }
++                let schedule = reminderSchedule(store: store)
++                guard !schedule.filtered.isEmpty else {
+                     DispatchQueue.main.async { completion(true) }
+                     return
+                 }
+-                for (index, reminder) in reminders.enumerated() {
++                for (index, reminder) in schedule.filtered.enumerated() {
+                     let content = UNMutableNotificationContent()
+                     content.title = "Push-up Manager reminder"
+                     content.body = "Log your push-ups to stay on target today."
+@@ -1451,13 +1653,74 @@ enum NotificationScheduler {
+         }
+     }
+ 
+-    private static func filteredReminders(store: PushupStore) -> [ReminderTime] {
+-        guard store.quietHoursEnabled else { return store.reminderTimes }
+-        return store.reminderTimes.filter { reminder in
++    static func reminderSchedule(store: PushupStore) -> ReminderSchedule {
++        let baseReminders = reminderTimes(store: store)
++        let filtered = filteredReminders(reminders: baseReminders, store: store)
++        return ReminderSchedule(all: baseReminders, filtered: filtered)
++    }
++
++    private static func reminderTimes(store: PushupStore) -> [ReminderTime] {
++        let baseReminders: [ReminderTime]
++        if store.useIntervalReminders {
++            baseReminders = intervalReminders(store: store)
++        } else {
++            baseReminders = store.reminderTimes
++        }
++        return filterStartTime(reminders: baseReminders, startTime: store.reminderStartTime)
++    }
++
++    private static func intervalReminders(store: PushupStore) -> [ReminderTime] {
++        let intervalHours = max(store.reminderIntervalHours, 1)
++        let calendar = Calendar.current
++        let now = Date()
++        let start = calendar.date(bySettingHour: calendar.component(.hour, from: store.reminderStartTime),
++                                  minute: calendar.component(.minute, from: store.reminderStartTime),
++                                  second: 0,
++                                  of: now) ?? now
++        guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else {
++            return []
++        }
++        var reminders: [ReminderTime] = []
++        var current = start
++        while current < end {
++            reminders.append(ReminderTime(time: current))
++            guard let next = calendar.date(byAdding: .hour, value: intervalHours, to: current) else {
++                break
++            }
++            current = next
++        }
++        return reminders
++    }
++
++    private static func filterStartTime(reminders: [ReminderTime], startTime: Date) -> [ReminderTime] {
++        let calendar = Calendar.current
++        let startMinutes = minutesSinceMidnight(for: startTime, calendar: calendar)
++        return reminders.filter { reminder in
++            minutesSinceMidnight(for: reminder.time, calendar: calendar) >= startMinutes
++        }
++    }
++
++    private static func filteredReminders(reminders: [ReminderTime], store: PushupStore) -> [ReminderTime] {
++        guard store.quietHoursEnabled else { return reminders }
++        return reminders.filter { reminder in
+             !isInQuietHours(time: reminder.time, start: store.quietHoursStart, end: store.quietHoursEnd)
+         }
+     }
+ 
++    private static func shouldScheduleBasedOnProgress(store: PushupStore) -> Bool {
++        guard store.onlyRemindIfBehind else { return true }
++        let total = store.total(for: Date())
++        let target = max(store.dailyTargetTotal(), 0)
++        switch store.behindThresholdType {
++        case .percent:
++            let percent = max(min(store.behindThresholdValue, 100), 0)
++            let threshold = Int(round(Double(target) * Double(percent) / 100.0))
++            return total < threshold
++        case .count:
++            return total < store.behindThresholdValue
++        }
++    }
++
+     private static func isInQuietHours(time: Date, start: Date, end: Date) -> Bool {
+         let calendar = Calendar.current
+         let timeMinutes = minutesSinceMidnight(for: time, calendar: calendar)
+PATCH
+)
