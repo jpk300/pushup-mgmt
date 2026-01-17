@@ -1,11 +1,3 @@
-//
-//  NotificationScheduler.swift
-//  Pushup Tracker
-//
-//  Created by Jason on 1/17/26.
-//
-
-
 import Foundation
 import UserNotifications
 
@@ -33,55 +25,62 @@ enum NotificationScheduler {
 
     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else {
-                DispatchQueue.main.async { completion(false) }
+        Task {
+            let granted: Bool
+            do {
+                granted = try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                await MainActor.run { completion(false) }
                 return
             }
-            center.getPendingNotificationRequests { requests in
-                let identifiers = requests
-                    .map(\.identifier)
-                    .filter { $0.hasPrefix("pushup-reminder-") }
-                center.removePendingNotificationRequests(withIdentifiers: identifiers)
-                Task { @MainActor in
-                    let snapshot = reminderSnapshot(store: store)
-                    guard snapshot.reminderEnabled,
-                          snapshot.useIntervalReminders || !snapshot.reminderTimes.isEmpty else {
-                        completion(true)
-                        return
-                    }
-                    guard snapshot.totalToday < snapshot.dailyTargetTotal else {
-                        completion(true)
-                        return
-                    }
-                    guard shouldScheduleBasedOnProgress(snapshot: snapshot) else {
-                        completion(true)
-                        return
-                    }
-                    let schedule = reminderSchedule(snapshot: snapshot)
-                    guard !schedule.filtered.isEmpty else {
-                        completion(true)
-                        return
-                    }
-                    for (index, reminder) in schedule.filtered.enumerated() {
-                        let content = UNMutableNotificationContent()
-                        content.title = "Push-up Manager reminder"
-                        content.body = "Log your push-ups to stay on target today."
-
-                        let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.time)
-                        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-                        let request = UNNotificationRequest(
-                            identifier: "pushup-reminder-\(index)",
-                            content: content,
-                            trigger: trigger
-                        )
-                        center.add(request)
-                    }
-                    completion(true)
-                }
+            guard granted else {
+                await MainActor.run { completion(false) }
+                return
             }
+
+        let requests = await center.pendingNotificationRequests()
+        let identifiers = requests
+            .map(\.identifier)
+            .filter { $0.hasPrefix("pushup-reminder-") }
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        await MainActor.run {
+            let snapshot = reminderSnapshot(store: store)
+            guard snapshot.reminderEnabled,
+                    snapshot.useIntervalReminders || !snapshot.reminderTimes.isEmpty else {
+                completion(true)
+                return
+            }
+            guard snapshot.totalToday < snapshot.dailyTargetTotal else {
+                completion(true)
+                return
+            }
+            guard shouldScheduleBasedOnProgress(snapshot: snapshot) else {
+                completion(true)
+                return
+            }
+            let schedule = reminderSchedule(snapshot: snapshot)
+            guard !schedule.filtered.isEmpty else {
+                completion(true)
+                return
+            }
+            for (index, reminder) in schedule.filtered.enumerated() {
+                let content = UNMutableNotificationContent()
+                content.title = "Push-up Manager reminder"
+                content.body = "Log your push-ups to stay on target today."
+
+                let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.time)
+                let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+                let request = UNNotificationRequest(
+                    identifier: "pushup-reminder-\(index)",
+                    content: content,
+                    trigger: trigger
+                )
+                center.add(request)
+            }
+            completion(true)
         }
     }
+}
 
     static func reminderSchedule(store: PushupStore) -> ReminderSchedule {
         let snapshot = reminderSnapshot(store: store)

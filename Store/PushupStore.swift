@@ -347,10 +347,3 @@ struct StorePayload: Codable {
         case showYearly
     }
 }
-//
-//  PushupStore.swift
-//  Pushup Tracker
-//
-//  Created by Jason on 1/17/26.
-//
-
