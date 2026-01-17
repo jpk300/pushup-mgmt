@@ -53,6 +53,7 @@ final class PushupStore: ObservableObject {
     func addEntry(count: Int) {
         entries.append(PushupEntry(count: count, timestamp: Date()))
         save()
+        guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
     }
 
@@ -60,14 +61,17 @@ final class PushupStore: ObservableObject {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
         save()
+        guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
     }
 
     func removeEntry(id: UUID) {
         entries.removeAll { $0.id == id }
         save()
+        guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
     }
+
 
     func total(for day: Date) -> Int {
         let dayStart = Calendar.current.startOfDay(for: day)

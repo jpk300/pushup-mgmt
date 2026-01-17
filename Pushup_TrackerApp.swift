@@ -1061,6 +1061,10 @@ struct CameraPushupCounterView: UIViewRepresentable {
             statusText = "Not calibrated"
         }
     }
+    static func dismantleUIView(_ uiView: ARSCNView, coordinator: Coordinator) {
+        uiView.session.pause()
+        uiView.session.delegate = nil
+    }
 }
 
 struct CalibrationOverlayView: View {
