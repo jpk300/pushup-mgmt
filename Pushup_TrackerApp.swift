@@ -20,6 +20,7 @@ struct PushManagerApp: App {
     }
 }
 
+@MainActor
 final class PushupStore: ObservableObject {
     @Published var targetType: TargetType = .dailyTotal
     @Published var dailyTarget: Int = 50
@@ -28,6 +29,9 @@ final class PushupStore: ObservableObject {
     @Published var entries: [PushupEntry] = []
     @Published var reminderEnabled: Bool = false
     @Published var reminderTimes: [ReminderTime] = [ReminderTime(time: PushupStore.defaultReminderTime())]
+    @Published var quietHoursEnabled: Bool = false
+    @Published var quietHoursStart: Date = PushupStore.defaultQuietHoursStart()
+    @Published var quietHoursEnd: Date = PushupStore.defaultQuietHoursEnd()
     @Published var showMonthly: Bool = true
     @Published var showQuarterly: Bool = true
     @Published var showYearly: Bool = true
@@ -36,6 +40,14 @@ final class PushupStore: ObservableObject {
 
     static func defaultReminderTime() -> Date {
         Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    static func defaultQuietHoursStart() -> Date {
+        Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    static func defaultQuietHoursEnd() -> Date {
+        Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date()) ?? Date()
     }
 
     func dailyTargetTotal() -> Int {
@@ -127,6 +139,9 @@ final class PushupStore: ObservableObject {
             entries: entries,
             reminderEnabled: reminderEnabled,
             reminderTimes: reminderTimes,
+            quietHoursEnabled: quietHoursEnabled,
+            quietHoursStart: quietHoursStart,
+            quietHoursEnd: quietHoursEnd,
             showMonthly: showMonthly,
             showQuarterly: showQuarterly,
             showYearly: showYearly
@@ -148,6 +163,9 @@ final class PushupStore: ObservableObject {
         entries = payload.entries
         reminderEnabled = payload.reminderEnabled
         reminderTimes = payload.reminderTimes
+        quietHoursEnabled = payload.quietHoursEnabled
+        quietHoursStart = payload.quietHoursStart
+        quietHoursEnd = payload.quietHoursEnd
         showMonthly = payload.showMonthly
         showQuarterly = payload.showQuarterly
         showYearly = payload.showYearly
@@ -179,6 +197,9 @@ struct StorePayload: Codable {
     var entries: [PushupEntry]
     var reminderEnabled: Bool
     var reminderTimes: [ReminderTime]
+    var quietHoursEnabled: Bool
+    var quietHoursStart: Date
+    var quietHoursEnd: Date
     var showMonthly: Bool
     var showQuarterly: Bool
     var showYearly: Bool
@@ -191,6 +212,9 @@ struct StorePayload: Codable {
         entries: [PushupEntry],
         reminderEnabled: Bool,
         reminderTimes: [ReminderTime],
+        quietHoursEnabled: Bool,
+        quietHoursStart: Date,
+        quietHoursEnd: Date,
         showMonthly: Bool,
         showQuarterly: Bool,
         showYearly: Bool
@@ -202,6 +226,9 @@ struct StorePayload: Codable {
         self.entries = entries
         self.reminderEnabled = reminderEnabled
         self.reminderTimes = reminderTimes
+        self.quietHoursEnabled = quietHoursEnabled
+        self.quietHoursStart = quietHoursStart
+        self.quietHoursEnd = quietHoursEnd
         self.showMonthly = showMonthly
         self.showQuarterly = showQuarterly
         self.showYearly = showYearly
@@ -218,6 +245,9 @@ struct StorePayload: Codable {
         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
+        quietHoursEnabled = (try? container.decode(Bool.self, forKey: .quietHoursEnabled)) ?? false
+        quietHoursStart = (try? container.decode(Date.self, forKey: .quietHoursStart)) ?? PushupStore.defaultQuietHoursStart()
+        quietHoursEnd = (try? container.decode(Date.self, forKey: .quietHoursEnd)) ?? PushupStore.defaultQuietHoursEnd()
         if let times = try? container.decode([ReminderTime].self, forKey: .reminderTimes) {
             reminderTimes = times
         } else if let legacyTime = try? container.decode(Date.self, forKey: .reminderTime) {
@@ -236,6 +266,9 @@ struct StorePayload: Codable {
         try container.encode(entries, forKey: .entries)
         try container.encode(reminderEnabled, forKey: .reminderEnabled)
         try container.encode(reminderTimes, forKey: .reminderTimes)
+        try container.encode(quietHoursEnabled, forKey: .quietHoursEnabled)
+        try container.encode(quietHoursStart, forKey: .quietHoursStart)
+        try container.encode(quietHoursEnd, forKey: .quietHoursEnd)
         try container.encode(showMonthly, forKey: .showMonthly)
         try container.encode(showQuarterly, forKey: .showQuarterly)
         try container.encode(showYearly, forKey: .showYearly)
@@ -250,6 +283,9 @@ struct StorePayload: Codable {
         case reminderEnabled
         case reminderTimes
         case reminderTime
+        case quietHoursEnabled
+        case quietHoursStart
+        case quietHoursEnd
         case showMonthly
         case showQuarterly
         case showYearly
@@ -651,6 +687,16 @@ struct AdminView: View {
                         }
                     }
 
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Enable quiet hours", isOn: $store.quietHoursEnabled)
+                        if store.quietHoursEnabled {
+                            HStack {
+                                DatePicker("Quiet hours start", selection: $store.quietHoursStart, displayedComponents: .hourAndMinute)
+                                DatePicker("Quiet hours end", selection: $store.quietHoursEnd, displayedComponents: .hourAndMinute)
+                            }
+                        }
+                    }
+
                     Button("Save reminders") {
                         NotificationScheduler.updateReminder(store: store) { authorized in
                             if !authorized {
@@ -691,6 +737,21 @@ struct AdminView: View {
                     store.save()
                 }
             }
+            .onChange(of: store.quietHoursEnabled) { _ in
+                NotificationScheduler.updateReminder(store: store) { _ in
+                    store.save()
+                }
+            }
+            .onChange(of: store.quietHoursStart) { _ in
+                NotificationScheduler.updateReminder(store: store) { _ in
+                    store.save()
+                }
+            }
+            .onChange(of: store.quietHoursEnd) { _ in
+                NotificationScheduler.updateReminder(store: store) { _ in
+                    store.save()
+                }
+            }
         }
     }
 
@@ -720,6 +781,11 @@ struct AdminView: View {
         let times = store.reminderTimes
             .map { $0.time.formatted(date: .omitted, time: .shortened) }
             .joined(separator: ", ")
+        if store.quietHoursEnabled {
+            let quietStart = store.quietHoursStart.formatted(date: .omitted, time: .shortened)
+            let quietEnd = store.quietHoursEnd.formatted(date: .omitted, time: .shortened)
+            return "Reminders set for \(times). Quiet hours: \(quietStart)–\(quietEnd)."
+        }
         return "Reminders set for \(times)."
     }
 
@@ -878,6 +944,11 @@ struct CameraPushupCounterView: UIViewRepresentable {
             self.onPermissionResult = onPermissionResult
             super.init()
             NotificationCenter.default.addObserver(self, selector: #selector(resetCalibration), name: .resetPushupCalibration, object: nil)
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self, name: .resetPushupCalibration, object: nil)
+            session?.pause()
         }
 
         func attachBlurOverlay(to view: ARSCNView) {
@@ -1120,18 +1191,29 @@ enum NotificationScheduler {
     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            DispatchQueue.main.async {
-                if !granted {
-                    completion(false)
-                    return
-                }
-                let identifiers = store.reminderTimes.indices.map { "pushup-reminder-\($0)" }
+            guard granted else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            center.getPendingNotificationRequests { requests in
+                let identifiers = requests
+                    .map(\.identifier)
+                    .filter { $0.hasPrefix("pushup-reminder-") }
                 center.removePendingNotificationRequests(withIdentifiers: identifiers)
                 guard store.reminderEnabled, !store.reminderTimes.isEmpty else {
-                    completion(true)
+                    DispatchQueue.main.async { completion(true) }
                     return
                 }
-                for (index, reminder) in store.reminderTimes.enumerated() {
+                guard store.total(for: Date()) < store.dailyTargetTotal() else {
+                    DispatchQueue.main.async { completion(true) }
+                    return
+                }
+                let reminders = filteredReminders(store: store)
+                guard !reminders.isEmpty else {
+                    DispatchQueue.main.async { completion(true) }
+                    return
+                }
+                for (index, reminder) in reminders.enumerated() {
                     let content = UNMutableNotificationContent()
                     content.title = "Push-up Manager reminder"
                     content.body = "Log your push-ups to stay on target today."
@@ -1145,9 +1227,35 @@ enum NotificationScheduler {
                     )
                     center.add(request)
                 }
-                completion(true)
+                DispatchQueue.main.async { completion(true) }
             }
         }
+    }
+
+    private static func filteredReminders(store: PushupStore) -> [ReminderTime] {
+        guard store.quietHoursEnabled else { return store.reminderTimes }
+        return store.reminderTimes.filter { reminder in
+            !isInQuietHours(time: reminder.time, start: store.quietHoursStart, end: store.quietHoursEnd)
+        }
+    }
+
+    private static func isInQuietHours(time: Date, start: Date, end: Date) -> Bool {
+        let calendar = Calendar.current
+        let timeMinutes = minutesSinceMidnight(for: time, calendar: calendar)
+        let startMinutes = minutesSinceMidnight(for: start, calendar: calendar)
+        let endMinutes = minutesSinceMidnight(for: end, calendar: calendar)
+        if startMinutes == endMinutes {
+            return true
+        }
+        if startMinutes < endMinutes {
+            return timeMinutes >= startMinutes && timeMinutes < endMinutes
+        }
+        return timeMinutes >= startMinutes || timeMinutes < endMinutes
+    }
+
+    private static func minutesSinceMidnight(for date: Date, calendar: Calendar) -> Int {
+        let components = calendar.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
     }
 }
 
