@@ -198,7 +198,7 @@ struct PushManagerView: View {
                 .onChange(of: store.showQuarterly) { ensureValidRangeSelection() }
                 .onChange(of: store.showYearly) { ensureValidRangeSelection() }
 
-                let totals = store.totals(for: rangeOption)
+                let totals = store.cachedTotals[rangeOption] ?? []
                 let sum = totals.reduce(0) { $0 + $1.total }
                 let average = totals.isEmpty ? 0 : Int(round(Double(sum) / Double(totals.count)))
 
@@ -222,7 +222,7 @@ struct PushManagerView: View {
                     }
                 }
 
-                let chartEntries = store.chartEntries(for: rangeOption)
+                let chartEntries = store.cachedChartEntries[rangeOption] ?? []
                 if rangeOption == .monthly || rangeOption == .quarterly || rangeOption == .yearly {
                     LineChart(entries: chartEntries)
                 } else {

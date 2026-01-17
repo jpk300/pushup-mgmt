@@ -22,10 +22,21 @@ enum NotificationScheduler {
         let totalToday: Int
         let dailyTargetTotal: Int
     }
-
     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
         let center = UNUserNotificationCenter.current()
         Task {
+            let snapshot = await MainActor.run { reminderSnapshot(store: store) }
+
+            // ✅ If reminders are OFF, do not request permission.
+            if !snapshot.reminderEnabled {
+                let requests = await center.pendingNotificationRequests()
+                let identifiers = requests.map(\.identifier).filter { $0.hasPrefix("pushup-reminder-") }
+                center.removePendingNotificationRequests(withIdentifiers: identifiers)
+                await MainActor.run { completion(true) }
+                return
+            }
+
+            // ✅ Only request permission when reminders are ON.
             let granted: Bool
             do {
                 granted = try await center.requestAuthorization(options: [.alert, .sound])
@@ -37,7 +48,6 @@ enum NotificationScheduler {
                 await MainActor.run { completion(false) }
                 return
             }
-
         let requests = await center.pendingNotificationRequests()
         let identifiers = requests
             .map(\.identifier)

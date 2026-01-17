@@ -26,37 +26,43 @@ final class PushupStore: ObservableObject {
     @Published var showMonthly: Bool = true
     @Published var showQuarterly: Bool = true
     @Published var showYearly: Bool = true
-
+    
     private let storageKey = "pushManagerStore"
     private var dailyTotalsCache: [Date: Int] = [:]
-
+    
     static func defaultReminderTime() -> Date {
         Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
     }
-
+    
     static func defaultQuietHoursStart() -> Date {
         Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
     }
-
+    
     static func defaultQuietHoursEnd() -> Date {
         Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date()) ?? Date()
     }
-
+    
     static func defaultReminderStartTime() -> Date {
         Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
     }
-
+    
     func dailyTargetTotal() -> Int {
         targetType == .incremental ? incrementSize * setsPerDay : dailyTarget
     }
-
+    
     func addEntry(count: Int) {
         entries.append(PushupEntry(count: count, timestamp: Date()))
+
+        func trimOldEntries() {
+            let cutoff = Calendar.current.date(byAdding: .day, value: -365, to: Date()) ?? Date()
+            entries = entries.filter { $0.timestamp >= cutoff }
+        }
+
         save()
         guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
     }
-
+    
     func updateEntry(id: UUID, count: Int) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
@@ -64,24 +70,24 @@ final class PushupStore: ObservableObject {
         guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
     }
-
+    
     func removeEntry(id: UUID) {
         entries.removeAll { $0.id == id }
         save()
         guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
     }
-
-
+    
+    
     func total(for day: Date) -> Int {
         let dayStart = Calendar.current.startOfDay(for: day)
         return dailyTotals[dayStart] ?? 0
     }
-
+    
     func streak() -> Int {
         let target = dailyTargetTotal()
         guard target > 0 else { return 0 }
-
+        
         var current = Date()
         var days = 0
         while total(for: current) >= target {
@@ -93,13 +99,13 @@ final class PushupStore: ObservableObject {
         }
         return days
     }
-
+    
     func totals(for range: RangeOption) -> [RangeEntry] {
         range.dates().map { date in
             RangeEntry(date: date, total: total(for: date))
         }
     }
-
+    
     func chartEntries(for range: RangeOption) -> [ChartEntry] {
         switch range {
         case .daily, .weekly, .monthly:
@@ -112,7 +118,7 @@ final class PushupStore: ObservableObject {
             return averagedEntries(range: range, bucketSize: 14)
         }
     }
-
+    
     private func averagedEntries(range: RangeOption, bucketSize: Int) -> [ChartEntry] {
         let dates = range.dates()
         guard !dates.isEmpty else { return [] }
@@ -132,7 +138,7 @@ final class PushupStore: ObservableObject {
         }
         return results
     }
-
+    
     func save() {
         let payload = StorePayload(
             targetType: targetType,
@@ -159,7 +165,7 @@ final class PushupStore: ObservableObject {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
-
+    
     func load() {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let payload = try? JSONDecoder().decode(StorePayload.self, from: data) else {
@@ -186,27 +192,38 @@ final class PushupStore: ObservableObject {
         showYearly = payload.showYearly
         recalculateDailyTotals()
     }
-
+    
     func addReminderTime(_ time: Date) {
         reminderTimes.append(ReminderTime(time: time))
         reminderTimes.sort { $0.time < $1.time }
         save()
     }
-
+    
     func removeReminderTime(at index: Int) {
         guard reminderTimes.indices.contains(index) else { return }
         reminderTimes.remove(at: index)
         save()
     }
-
+    
     private func recalculateDailyTotals() {
         dailyTotalsCache = Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
             .mapValues { $0.reduce(0) { $0 + $1.count } }
     }
-
+    
     private var dailyTotals: [Date: Int] {
         dailyTotalsCache
     }
+    
+    @Published private(set) var cachedTotals: [RangeOption: [RangeEntry]] = [:]
+    @Published private(set) var cachedChartEntries: [RangeOption: [ChartEntry]] = [:]
+
+    private func recalculateCaches() {
+        RangeOption.allCases.forEach { option in
+            cachedTotals[option] = totals(for: option)
+            cachedChartEntries[option] = chartEntries(for: option)
+        }
+    }
+
 }
 
 struct StorePayload: Codable {
