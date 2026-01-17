@@ -1,0 +1,25 @@
+diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
+index 46eec1b..7f98692 100644
+--- a/Pushup_TrackerApp.swift
++++ b/Pushup_TrackerApp.swift
+@@ -909,8 +909,7 @@ struct CameraView: View {
+                                 .font(.caption)
+                                 .foregroundColor(.secondary)
+                             Text("\(cameraCount)")
+-                                .font(.largeTitle)
+-                                .fontWeight(.bold)
++                                .font(.system(size: 56, weight: .bold))
+                         }
+ 
+                         if let distance = cameraDistance {
+@@ -920,8 +919,8 @@ struct CameraView: View {
+                         }
+ 
+                         Text(cameraStatus)
+-                            .font(.caption)
+-                            .foregroundColor(.secondary)
++                            .font(.headline)
++                            .foregroundColor(.primary)
+ 
+                         HStack {
+                             Button("Start counting") {

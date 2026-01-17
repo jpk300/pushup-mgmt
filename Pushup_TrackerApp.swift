@@ -27,7 +27,11 @@ final class PushupStore: ObservableObject {
     @Published var dailyTarget: Int = 50
     @Published var incrementSize: Int = 10
     @Published var setsPerDay: Int = 5
-    @Published var entries: [PushupEntry] = []
+    @Published var entries: [PushupEntry] = [] {
+        didSet {
+            recalculateDailyTotals()
+        }
+    }
     @Published var reminderEnabled: Bool = false
     @Published var reminderTimes: [ReminderTime] = [ReminderTime(time: PushupStore.defaultReminderTime())]
     @Published var quietHoursEnabled: Bool = false
@@ -38,6 +42,7 @@ final class PushupStore: ObservableObject {
     @Published var showYearly: Bool = true
 
     private let storageKey = "pushManagerStore"
+    private var dailyTotalsCache: [Date: Int] = [:]
 
     static func defaultReminderTime() -> Date {
         Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
@@ -58,17 +63,20 @@ final class PushupStore: ObservableObject {
     func addEntry(count: Int) {
         entries.append(PushupEntry(count: count, timestamp: Date()))
         save()
+        NotificationScheduler.updateReminder(store: self) { _ in }
     }
 
     func updateEntry(id: UUID, count: Int) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
         save()
+        NotificationScheduler.updateReminder(store: self) { _ in }
     }
 
     func removeEntry(id: UUID) {
         entries.removeAll { $0.id == id }
         save()
+        NotificationScheduler.updateReminder(store: self) { _ in }
     }
 
     func total(for day: Date) -> Int {
@@ -170,6 +178,7 @@ final class PushupStore: ObservableObject {
         showMonthly = payload.showMonthly
         showQuarterly = payload.showQuarterly
         showYearly = payload.showYearly
+        recalculateDailyTotals()
     }
 
     func addReminderTime(_ time: Date) {
@@ -184,9 +193,13 @@ final class PushupStore: ObservableObject {
         save()
     }
 
-    private var dailyTotals: [Date: Int] {
-        Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
+    private func recalculateDailyTotals() {
+        dailyTotalsCache = Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
             .mapValues { $0.reduce(0) { $0 + $1.count } }
+    }
+
+    private var dailyTotals: [Date: Int] {
+        dailyTotalsCache
     }
 }
 
@@ -357,7 +370,8 @@ enum RangeOption: String, CaseIterable, Identifiable {
     }
 
     func dates() -> [Date] {
-        let today = Calendar.current.startOfDay(for: Date())
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
         let dayCount: Int
         switch self {
         case .daily:
@@ -365,14 +379,24 @@ enum RangeOption: String, CaseIterable, Identifiable {
         case .weekly:
             dayCount = 7
         case .monthly:
-            dayCount = 30
+            dayCount = calendar.range(of: .day, in: .month, for: today)?.count ?? 30
         case .quarterly:
-            dayCount = 90
+            let month = calendar.component(.month, from: today)
+            let quarterStartMonth = ((month - 1) / 3) * 3 + 1
+            var totalDays = 0
+            for offset in 0..<3 {
+                var components = calendar.dateComponents([.year], from: today)
+                components.month = quarterStartMonth + offset
+                if let monthDate = calendar.date(from: components) {
+                    totalDays += calendar.range(of: .day, in: .month, for: monthDate)?.count ?? 30
+                }
+            }
+            dayCount = totalDays
         case .yearly:
-            dayCount = 365
+            dayCount = calendar.range(of: .day, in: .year, for: today)?.count ?? 365
         }
         return (0..<dayCount).compactMap { offset in
-            Calendar.current.date(byAdding: .day, value: -(dayCount - 1 - offset), to: today)
+            calendar.date(byAdding: .day, value: -(dayCount - 1 - offset), to: today)
         }
     }
 }
@@ -380,9 +404,11 @@ enum RangeOption: String, CaseIterable, Identifiable {
 struct PushManagerView: View {
     @EnvironmentObject private var store: PushupStore
     @State private var logCount: String = ""
+    @State private var logErrorMessage: String?
     @State private var rangeOption: RangeOption = .weekly
     @State private var editingEntry: PushupEntry?
     @State private var editCount: String = ""
+    @State private var editErrorMessage: String?
     @FocusState private var isLogFieldFocused: Bool
     private var availableRanges: [RangeOption] {
         var ranges: [RangeOption] = [.daily, .weekly]
@@ -393,7 +419,7 @@ struct PushManagerView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     heroSection
@@ -442,13 +468,25 @@ struct PushManagerView: View {
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .focused($isLogFieldFocused)
+                        .onChange(of: logCount) { _ in
+                            logErrorMessage = nil
+                        }
                     Button("Add set") {
-                        guard let count = Int(logCount), count > 0 else { return }
+                        guard let count = Int(logCount), count > 0 else {
+                            logErrorMessage = "Enter a number greater than zero."
+                            return
+                        }
                         store.addEntry(count: count)
                         logCount = ""
+                        logErrorMessage = nil
                         isLogFieldFocused = false
                     }
                     .buttonStyle(.borderedProminent)
+                }
+                if let logErrorMessage {
+                    Text(logErrorMessage)
+                        .font(.caption)
+                        .foregroundColor(.red)
                 }
 
                 ProgressView(value: Double(store.total(for: Date())), total: Double(max(store.dailyTargetTotal(), 1)))
@@ -494,20 +532,33 @@ struct PushManagerView: View {
             }
         }
         .sheet(item: $editingEntry) { entry in
-            NavigationView {
+            NavigationStack {
                 Form {
                     Section(header: Text("Update set")) {
                         TextField("Push-ups", text: $editCount)
                             .keyboardType(.numberPad)
+                            .onChange(of: editCount) { _ in
+                                editErrorMessage = nil
+                            }
+                        if let editErrorMessage {
+                            Text(editErrorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
                     Section {
                         Button("Save changes") {
-                            guard let count = Int(editCount), count > 0 else { return }
+                            guard let count = Int(editCount), count > 0 else {
+                                editErrorMessage = "Enter a number greater than zero."
+                                return
+                            }
                             store.updateEntry(id: entry.id, count: count)
+                            editErrorMessage = nil
                             editingEntry = nil
                         }
                         Button("Delete set", role: .destructive) {
                             store.removeEntry(id: entry.id)
+                            editErrorMessage = nil
                             editingEntry = nil
                         }
                     }
@@ -520,6 +571,9 @@ struct PushManagerView: View {
                         }
                     }
                 }
+            }
+            .onAppear {
+                editErrorMessage = nil
             }
         }
     }
@@ -663,17 +717,15 @@ struct AdminView: View {
                         Text("Reminder times")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                        ForEach($store.reminderTimes) { $reminder in
+                        ForEach(store.reminderTimes.indices, id: \.self) { index in
                             HStack {
                                 DatePicker(
                                     "Reminder",
-                                    selection: $reminder.time,
+                                    selection: $store.reminderTimes[index].time,
                                     displayedComponents: .hourAndMinute
                                 )
                                 Button("Remove") {
-                                    if let index = store.reminderTimes.firstIndex(of: reminder) {
-                                        store.removeReminderTime(at: index)
-                                    }
+                                    store.removeReminderTime(at: index)
                                 }
                                 .buttonStyle(.borderless)
                             }
@@ -780,11 +832,11 @@ struct AdminView: View {
             return "Add at least one reminder time."
         }
         let times = store.reminderTimes
-            .map { $0.time.formatted(date: .omitted, time: .shortened) }
+            .map { $0.time.formatted(DateFormats.reminderTime) }
             .joined(separator: ", ")
         if store.quietHoursEnabled {
-            let quietStart = store.quietHoursStart.formatted(date: .omitted, time: .shortened)
-            let quietEnd = store.quietHoursEnd.formatted(date: .omitted, time: .shortened)
+            let quietStart = store.quietHoursStart.formatted(DateFormats.reminderTime)
+            let quietEnd = store.quietHoursEnd.formatted(DateFormats.reminderTime)
             return "Reminders set for \(times). Quiet hours: \(quietStart)–\(quietEnd)."
         }
         return "Reminders set for \(times)."
@@ -805,6 +857,7 @@ struct CameraView: View {
     @State private var showCalibrationOverlay: Bool = true
     @State private var pendingSaveCount: Int?
     @State private var showingSaveConfirmation: Bool = false
+    @State private var showFlash: Bool = false
 
     var body: some View {
         ScrollView {
@@ -822,6 +875,7 @@ struct CameraView: View {
                                 currentDistance: $cameraDistance,
                                 isCounting: $isCounting,
                                 isCalibrated: $isCalibrated,
+                                showFlash: $showFlash,
                                 onPermissionResult: { message in
                                     cameraAlertMessage = message
                                     showingCameraAlert = true
@@ -829,6 +883,13 @@ struct CameraView: View {
                             )
                             .frame(height: 320)
                             .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                            if showFlash {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.white.opacity(0.4))
+                                    .transition(.opacity)
+                                    .allowsHitTesting(false)
+                            }
 
                             if showCalibrationOverlay {
                                 CalibrationOverlayView(
@@ -848,19 +909,18 @@ struct CameraView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text("\(cameraCount)")
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
+                                .font(.system(size: 56, weight: .bold))
                         }
 
                         if let distance = cameraDistance {
-                            Text("Estimated distance: \(String(format: "%.2f", distance)) m")
+                            Text("Estimated distance: \(distance.formatted(.number.precision(.fractionLength(2)))) m")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
 
                         Text(cameraStatus)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(.headline)
+                            .foregroundColor(.primary)
 
                         HStack {
                             Button("Start counting") {
@@ -960,6 +1020,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
     @Binding var currentDistance: Double?
     @Binding var isCounting: Bool
     @Binding var isCalibrated: Bool
+    @Binding var showFlash: Bool
     let onPermissionResult: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -969,6 +1030,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             currentDistance: $currentDistance,
             isCounting: $isCounting,
             isCalibrated: $isCalibrated,
+            showFlash: $showFlash,
             onPermissionResult: onPermissionResult
         )
     }
@@ -991,6 +1053,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
         @Binding private var currentDistance: Double?
         @Binding private var isCounting: Bool
         @Binding private var isCalibrated: Bool
+        @Binding private var showFlash: Bool
         private let onPermissionResult: (String) -> Void
         private var baselineDistance: Double?
         private var isNear: Bool = false
@@ -998,7 +1061,6 @@ struct CameraPushupCounterView: UIViewRepresentable {
         private weak var sceneView: ARSCNView?
         private weak var blurView: UIVisualEffectView?
         private let maskLayer = CAShapeLayer()
-        private let feedbackGenerator = UINotificationFeedbackGenerator()
 
         init(
             count: Binding<Int>,
@@ -1006,6 +1068,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             currentDistance: Binding<Double?>,
             isCounting: Binding<Bool>,
             isCalibrated: Binding<Bool>,
+            showFlash: Binding<Bool>,
             onPermissionResult: @escaping (String) -> Void
         ) {
             _count = count
@@ -1013,6 +1076,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             _currentDistance = currentDistance
             _isCounting = isCounting
             _isCalibrated = isCalibrated
+            _showFlash = showFlash
             self.onPermissionResult = onPermissionResult
             super.init()
             NotificationCenter.default.addObserver(self, selector: #selector(resetCalibration), name: .resetPushupCalibration, object: nil)
@@ -1119,7 +1183,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             if baselineDistance == nil {
                 baselineDistance = distance
                 isCalibrated = true
-                statusText = "Calibrated at \(String(format: "%.2f", distance)) m. Begin push-ups."
+                statusText = "Calibrated at \(distance.formatted(.number.precision(.fractionLength(2)))) m. Begin push-ups."
                 return
             }
 
@@ -1137,7 +1201,10 @@ struct CameraPushupCounterView: UIViewRepresentable {
                 isNear = false
                 count += 1
                 statusText = "Up position detected. Push-up counted."
-                feedbackGenerator.notificationOccurred(.success)
+                showFlash = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.showFlash = false
+                }
             }
         }
 
@@ -1272,7 +1339,7 @@ struct BarChart: View {
         VStack(spacing: 10) {
             ForEach(entries.suffix(10)) { entry in
                 HStack {
-                    Text(entry.date, format: .dateTime.month().day())
+                    Text(entry.date, format: DateFormats.chartDay)
                         .font(.caption)
                         .frame(width: 70, alignment: .leading)
                     GeometryReader { geometry in
@@ -1332,6 +1399,11 @@ struct LineChart: View {
         }
         .frame(height: 180)
     }
+}
+
+enum DateFormats {
+    static let reminderTime = Date.FormatStyle(date: .omitted, time: .shortened)
+    static let chartDay = Date.FormatStyle.dateTime.month().day()
 }
 
 enum NotificationScheduler {

@@ -1,0 +1,114 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/notification_config_update_v2.patch b/notification_config_update_v2.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..e4b8d9683bc175aaf6cdb7bf139cca4cc406e25d
+--- /dev/null
++++ b/notification_config_update_v2.patch
+@@ -0,0 +1,104 @@
++diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
++index 13a4e04..1e60275 100644
++--- a/Pushup_TrackerApp.swift
+++++ b/Pushup_TrackerApp.swift
++@@ -783,12 +783,10 @@ struct AdminView: View {
++                             .font(.subheadline)
++                             .fontWeight(.semibold)
++ 
++-                        Picker("Reminder style", selection: $store.reminderMode) {
++-                            ForEach(ReminderMode.allCases) { mode in
++-                                Text(mode.label).tag(mode)
++-                            }
++-                        }
++-                        .pickerStyle(.segmented)
+++                        Toggle("Use interval reminders", isOn: Binding(
+++                            get: { store.reminderMode == .interval },
+++                            set: { store.reminderMode = $0 ? .interval : .fixedTimes }
+++                        ))
++ 
++                         if store.reminderMode == .fixedTimes {
++                             ForEach(store.reminderTimes.indices, id: \.self) { index in
++@@ -814,7 +812,7 @@ struct AdminView: View {
++                             }
++ 
++                             HStack(spacing: 12) {
++-                                Button("Morning / midday / evening") {
+++                                Button("3x/day") {
++                                     store.reminderTimes = [
++                                         ReminderTime(time: Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: Date()) ?? Date()),
++                                         ReminderTime(time: Calendar.current.date(bySettingHour: 13, minute: 0, second: 0, of: Date()) ?? Date()),
++@@ -824,6 +822,14 @@ struct AdminView: View {
++                                 }
++                                 .buttonStyle(.bordered)
++ 
+++                                Button("Morning only") {
+++                                    store.reminderTimes = [
+++                                        ReminderTime(time: Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: Date()) ?? Date())
+++                                    ]
+++                                    store.save()
+++                                }
+++                                .buttonStyle(.bordered)
+++
++                                 Button("Evening only") {
++                                     store.reminderTimes = [
++                                         ReminderTime(time: Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date())
++@@ -841,6 +847,11 @@ struct AdminView: View {
++                                 selection: $store.reminderStartAfter,
++                                 displayedComponents: .hourAndMinute
++                             )
+++                            Button("Every 2 hours") {
+++                                store.reminderIntervalHours = 2
+++                                store.save()
+++                            }
+++                            .buttonStyle(.bordered)
++                         }
++                     }
++ 
++@@ -988,17 +999,21 @@ struct AdminView: View {
++         if total >= target {
++             return "Target already met today. Reminders are paused."
++         }
++-        let times = NotificationScheduler.plannedReminderTimes(store: store)
++-        if times.isEmpty {
+++        let plannedTimes = NotificationScheduler.plannedReminderTimes(store: store)
+++        if plannedTimes.isEmpty {
++             return "No reminders scheduled outside quiet hours."
++         }
++-        let timesText = times
+++        let suppressedCount = NotificationScheduler.quietHoursSuppressedCount(store: store)
+++        let timesText = plannedTimes
++             .map { $0.time.formatted(DateFormats.reminderTime) }
++             .joined(separator: ", ")
++         if store.quietHoursEnabled {
++             let quietStart = store.quietHoursStart.formatted(DateFormats.reminderTime)
++             let quietEnd = store.quietHoursEnd.formatted(DateFormats.reminderTime)
++-            return "Reminders set for \(timesText). Quiet hours: \(quietStart)–\(quietEnd)."
+++            let suppressedText = suppressedCount > 0
+++                ? " \(suppressedCount) reminder\(suppressedCount == 1 ? "" : "s") suppressed by quiet hours."
+++                : ""
+++            return "Reminders set for \(timesText). Quiet hours: \(quietStart)–\(quietEnd).\(suppressedText)"
++         }
++         return "Reminders set for \(timesText)."
++     }
++@@ -1635,6 +1650,20 @@ enum NotificationScheduler {
++         }
++     }
++ 
+++    static func quietHoursSuppressedCount(store: PushupStore) -> Int {
+++        guard store.quietHoursEnabled else { return 0 }
+++        let baseTimes: [ReminderTime]
+++        switch store.reminderMode {
+++        case .fixedTimes:
+++            baseTimes = store.reminderTimes
+++        case .interval:
+++            baseTimes = intervalTimes(store: store)
+++        }
+++        return baseTimes.filter { reminder in
+++            isInQuietHours(time: reminder.time, start: store.quietHoursStart, end: store.quietHoursEnd)
+++        }.count
+++    }
+++
++     private static func intervalTimes(store: PushupStore) -> [ReminderTime] {
++         let intervalHours = max(store.reminderIntervalHours, 1)
++         let calendar = Calendar.current
+ 
+EOF
+)
