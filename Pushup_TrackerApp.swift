@@ -27,7 +27,7 @@ final class PushupStore: ObservableObject {
     @Published var setsPerDay: Int = 5
     @Published var entries: [PushupEntry] = []
     @Published var reminderEnabled: Bool = false
-    @Published var reminderTimes: [Date] = [PushupStore.defaultReminderTime()]
+    @Published var reminderTimes: [ReminderTime] = [ReminderTime(time: PushupStore.defaultReminderTime())]
     @Published var showMonthly: Bool = true
     @Published var showQuarterly: Bool = true
     @Published var showYearly: Bool = true
@@ -59,9 +59,8 @@ final class PushupStore: ObservableObject {
     }
 
     func total(for day: Date) -> Int {
-        entries
-            .filter { Calendar.current.isDate($0.timestamp, inSameDayAs: day) }
-            .reduce(0) { $0 + $1.count }
+        let dayStart = Calendar.current.startOfDay(for: day)
+        return dailyTotals[dayStart] ?? 0
     }
 
     func streak() -> Int {
@@ -155,8 +154,8 @@ final class PushupStore: ObservableObject {
     }
 
     func addReminderTime(_ time: Date) {
-        reminderTimes.append(time)
-        reminderTimes.sort { $0 < $1 }
+        reminderTimes.append(ReminderTime(time: time))
+        reminderTimes.sort { $0.time < $1.time }
         save()
     }
 
@@ -164,6 +163,11 @@ final class PushupStore: ObservableObject {
         guard reminderTimes.indices.contains(index) else { return }
         reminderTimes.remove(at: index)
         save()
+    }
+
+    private var dailyTotals: [Date: Int] {
+        Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
+            .mapValues { $0.reduce(0) { $0 + $1.count } }
     }
 }
 
@@ -174,7 +178,7 @@ struct StorePayload: Codable {
     var setsPerDay: Int
     var entries: [PushupEntry]
     var reminderEnabled: Bool
-    var reminderTimes: [Date]
+    var reminderTimes: [ReminderTime]
     var showMonthly: Bool
     var showQuarterly: Bool
     var showYearly: Bool
@@ -186,7 +190,7 @@ struct StorePayload: Codable {
         setsPerDay: Int,
         entries: [PushupEntry],
         reminderEnabled: Bool,
-        reminderTimes: [Date],
+        reminderTimes: [ReminderTime],
         showMonthly: Bool,
         showQuarterly: Bool,
         showYearly: Bool
@@ -214,12 +218,12 @@ struct StorePayload: Codable {
         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
-        if let times = try? container.decode([Date].self, forKey: .reminderTimes) {
+        if let times = try? container.decode([ReminderTime].self, forKey: .reminderTimes) {
             reminderTimes = times
         } else if let legacyTime = try? container.decode(Date.self, forKey: .reminderTime) {
-            reminderTimes = [legacyTime]
+            reminderTimes = [ReminderTime(time: legacyTime)]
         } else {
-            reminderTimes = [PushupStore.defaultReminderTime()]
+            reminderTimes = [ReminderTime(time: PushupStore.defaultReminderTime())]
         }
     }
 
@@ -268,6 +272,16 @@ struct RangeEntry: Identifiable {
     let id = UUID()
     let date: Date
     let total: Int
+}
+
+struct ReminderTime: Identifiable, Codable, Hashable {
+    let id: UUID
+    var time: Date
+
+    init(id: UUID = UUID(), time: Date) {
+        self.id = id
+        self.time = time
+    }
 }
 
 struct ChartEntry: Identifiable {
@@ -612,15 +626,15 @@ struct AdminView: View {
                         Text("Reminder times")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                        ForEach($store.reminderTimes, id: \.self) { $time in
+                        ForEach($store.reminderTimes) { $reminder in
                             HStack {
                                 DatePicker(
                                     "Reminder",
-                                    selection: $time,
+                                    selection: $reminder.time,
                                     displayedComponents: .hourAndMinute
                                 )
                                 Button("Remove") {
-                                    if let index = store.reminderTimes.firstIndex(of: time) {
+                                    if let index = store.reminderTimes.firstIndex(of: reminder) {
                                         store.removeReminderTime(at: index)
                                     }
                                 }
@@ -704,7 +718,7 @@ struct AdminView: View {
             return "Add at least one reminder time."
         }
         let times = store.reminderTimes
-            .map { $0.formatted(date: .omitted, time: .shortened) }
+            .map { $0.time.formatted(date: .omitted, time: .shortened) }
             .joined(separator: ", ")
         return "Reminders set for \(times)."
     }
@@ -1111,17 +1125,18 @@ enum NotificationScheduler {
                     completion(false)
                     return
                 }
-                center.removeAllPendingNotificationRequests()
+                let identifiers = store.reminderTimes.indices.map { "pushup-reminder-\($0)" }
+                center.removePendingNotificationRequests(withIdentifiers: identifiers)
                 guard store.reminderEnabled, !store.reminderTimes.isEmpty else {
                     completion(true)
                     return
                 }
-                for (index, time) in store.reminderTimes.enumerated() {
+                for (index, reminder) in store.reminderTimes.enumerated() {
                     let content = UNMutableNotificationContent()
                     content.title = "Push-up Manager reminder"
                     content.body = "Log your push-ups to stay on target today."
 
-                    let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: time)
+                    let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.time)
                     let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
                     let request = UNNotificationRequest(
                         identifier: "pushup-reminder-\(index)",

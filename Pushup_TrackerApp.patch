@@ -1,0 +1,455 @@
+diff --git a/Pushup_TrackerApp.swift b/Pushup_TrackerApp.swift
+index 86298f86a90a1b515889403bc6236fef66850e3e..8e5b855e4a2dc1aad8cae5775c66754b9702bf26 100644
+--- a/Pushup_TrackerApp.swift
++++ b/Pushup_TrackerApp.swift
+@@ -5,85 +5,84 @@ import ARKit
+ import AVFoundation
+ 
+ @main
+ struct PushManagerApp: App {
+     @StateObject private var store = PushupStore()
+ 
+     var body: some Scene {
+         WindowGroup {
+             PushManagerView()
+                 .environmentObject(store)
+                 .tint(.blueSteel)
+                 .onAppear {
+                     store.load()
+                 }
+         }
+     }
+ }
+ 
+ final class PushupStore: ObservableObject {
+     @Published var targetType: TargetType = .dailyTotal
+     @Published var dailyTarget: Int = 50
+     @Published var incrementSize: Int = 10
+     @Published var setsPerDay: Int = 5
+     @Published var entries: [PushupEntry] = []
+     @Published var reminderEnabled: Bool = false
+-    @Published var reminderTimes: [Date] = [PushupStore.defaultReminderTime()]
++    @Published var reminderTimes: [ReminderTime] = [ReminderTime(time: PushupStore.defaultReminderTime())]
+     @Published var showMonthly: Bool = true
+     @Published var showQuarterly: Bool = true
+     @Published var showYearly: Bool = true
+ 
+     private let storageKey = "pushManagerStore"
+ 
+     static func defaultReminderTime() -> Date {
+         Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
+     }
+ 
+     func dailyTargetTotal() -> Int {
+         targetType == .incremental ? incrementSize * setsPerDay : dailyTarget
+     }
+ 
+     func addEntry(count: Int) {
+         entries.append(PushupEntry(count: count, timestamp: Date()))
+         save()
+     }
+ 
+     func updateEntry(id: UUID, count: Int) {
+         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+         entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
+         save()
+     }
+ 
+     func removeEntry(id: UUID) {
+         entries.removeAll { $0.id == id }
+         save()
+     }
+ 
+     func total(for day: Date) -> Int {
+-        entries
+-            .filter { Calendar.current.isDate($0.timestamp, inSameDayAs: day) }
+-            .reduce(0) { $0 + $1.count }
++        let dayStart = Calendar.current.startOfDay(for: day)
++        return dailyTotals[dayStart] ?? 0
+     }
+ 
+     func streak() -> Int {
+         let target = dailyTargetTotal()
+         guard target > 0 else { return 0 }
+ 
+         var current = Date()
+         var days = 0
+         while total(for: current) >= target {
+             days += 1
+             guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
+                 break
+             }
+             current = previous
+         }
+         return days
+     }
+ 
+     func totals(for range: RangeOption) -> [RangeEntry] {
+         range.dates().map { date in
+             RangeEntry(date: date, total: total(for: date))
+         }
+     }
+ 
+     func chartEntries(for range: RangeOption) -> [ChartEntry] {
+@@ -133,165 +132,180 @@ final class PushupStore: ObservableObject {
+             showYearly: showYearly
+         )
+         if let data = try? JSONEncoder().encode(payload) {
+             UserDefaults.standard.set(data, forKey: storageKey)
+         }
+     }
+ 
+     func load() {
+         guard let data = UserDefaults.standard.data(forKey: storageKey),
+               let payload = try? JSONDecoder().decode(StorePayload.self, from: data) else {
+             return
+         }
+         targetType = payload.targetType
+         dailyTarget = payload.dailyTarget
+         incrementSize = payload.incrementSize
+         setsPerDay = payload.setsPerDay
+         entries = payload.entries
+         reminderEnabled = payload.reminderEnabled
+         reminderTimes = payload.reminderTimes
+         showMonthly = payload.showMonthly
+         showQuarterly = payload.showQuarterly
+         showYearly = payload.showYearly
+     }
+ 
+     func addReminderTime(_ time: Date) {
+-        reminderTimes.append(time)
+-        reminderTimes.sort { $0 < $1 }
++        reminderTimes.append(ReminderTime(time: time))
++        reminderTimes.sort { $0.time < $1.time }
+         save()
+     }
+ 
+     func removeReminderTime(at index: Int) {
+         guard reminderTimes.indices.contains(index) else { return }
+         reminderTimes.remove(at: index)
+         save()
+     }
++
++    private var dailyTotals: [Date: Int] {
++        Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
++            .mapValues { $0.reduce(0) { $0 + $1.count } }
++    }
+ }
+ 
+ struct StorePayload: Codable {
+     var targetType: TargetType
+     var dailyTarget: Int
+     var incrementSize: Int
+     var setsPerDay: Int
+     var entries: [PushupEntry]
+     var reminderEnabled: Bool
+-    var reminderTimes: [Date]
++    var reminderTimes: [ReminderTime]
+     var showMonthly: Bool
+     var showQuarterly: Bool
+     var showYearly: Bool
+ 
+     init(
+         targetType: TargetType,
+         dailyTarget: Int,
+         incrementSize: Int,
+         setsPerDay: Int,
+         entries: [PushupEntry],
+         reminderEnabled: Bool,
+-        reminderTimes: [Date],
++        reminderTimes: [ReminderTime],
+         showMonthly: Bool,
+         showQuarterly: Bool,
+         showYearly: Bool
+     ) {
+         self.targetType = targetType
+         self.dailyTarget = dailyTarget
+         self.incrementSize = incrementSize
+         self.setsPerDay = setsPerDay
+         self.entries = entries
+         self.reminderEnabled = reminderEnabled
+         self.reminderTimes = reminderTimes
+         self.showMonthly = showMonthly
+         self.showQuarterly = showQuarterly
+         self.showYearly = showYearly
+     }
+ 
+     init(from decoder: Decoder) throws {
+         let container = try decoder.container(keyedBy: CodingKeys.self)
+         targetType = try container.decode(TargetType.self, forKey: .targetType)
+         dailyTarget = try container.decode(Int.self, forKey: .dailyTarget)
+         incrementSize = try container.decode(Int.self, forKey: .incrementSize)
+         setsPerDay = try container.decode(Int.self, forKey: .setsPerDay)
+         entries = try container.decode([PushupEntry].self, forKey: .entries)
+         reminderEnabled = try container.decode(Bool.self, forKey: .reminderEnabled)
+         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
+         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
+         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
+-        if let times = try? container.decode([Date].self, forKey: .reminderTimes) {
++        if let times = try? container.decode([ReminderTime].self, forKey: .reminderTimes) {
+             reminderTimes = times
+         } else if let legacyTime = try? container.decode(Date.self, forKey: .reminderTime) {
+-            reminderTimes = [legacyTime]
++            reminderTimes = [ReminderTime(time: legacyTime)]
+         } else {
+-            reminderTimes = [PushupStore.defaultReminderTime()]
++            reminderTimes = [ReminderTime(time: PushupStore.defaultReminderTime())]
+         }
+     }
+ 
+     func encode(to encoder: Encoder) throws {
+         var container = encoder.container(keyedBy: CodingKeys.self)
+         try container.encode(targetType, forKey: .targetType)
+         try container.encode(dailyTarget, forKey: .dailyTarget)
+         try container.encode(incrementSize, forKey: .incrementSize)
+         try container.encode(setsPerDay, forKey: .setsPerDay)
+         try container.encode(entries, forKey: .entries)
+         try container.encode(reminderEnabled, forKey: .reminderEnabled)
+         try container.encode(reminderTimes, forKey: .reminderTimes)
+         try container.encode(showMonthly, forKey: .showMonthly)
+         try container.encode(showQuarterly, forKey: .showQuarterly)
+         try container.encode(showYearly, forKey: .showYearly)
+     }
+ 
+     enum CodingKeys: String, CodingKey {
+         case targetType
+         case dailyTarget
+         case incrementSize
+         case setsPerDay
+         case entries
+         case reminderEnabled
+         case reminderTimes
+         case reminderTime
+         case showMonthly
+         case showQuarterly
+         case showYearly
+     }
+ }
+ 
+ struct PushupEntry: Identifiable, Codable {
+     let id: UUID
+     let count: Int
+     let timestamp: Date
+ 
+     init(id: UUID = UUID(), count: Int, timestamp: Date) {
+         self.id = id
+         self.count = count
+         self.timestamp = timestamp
+     }
+ }
+ 
+ struct RangeEntry: Identifiable {
+     let id = UUID()
+     let date: Date
+     let total: Int
+ }
+ 
++struct ReminderTime: Identifiable, Codable, Hashable {
++    let id: UUID
++    var time: Date
++
++    init(id: UUID = UUID(), time: Date) {
++        self.id = id
++        self.time = time
++    }
++}
++
+ struct ChartEntry: Identifiable {
+     let id = UUID()
+     let date: Date
+     let value: Double
+ }
+ 
+ enum TargetType: String, CaseIterable, Codable, Identifiable {
+     case dailyTotal
+     case incremental
+ 
+     var id: String { rawValue }
+ 
+     var label: String {
+         switch self {
+         case .dailyTotal:
+             return "Daily total"
+         case .incremental:
+             return "Incremental sets"
+         }
+     }
+ }
+ 
+ enum RangeOption: String, CaseIterable, Identifiable {
+     case daily
+     case weekly
+@@ -590,59 +604,59 @@ struct AdminView: View {
+         SectionCard(title: "Notification setup") {
+             VStack(alignment: .leading, spacing: 16) {
+                 HStack(spacing: 12) {
+                     Image(systemName: "bell.badge.fill")
+                         .foregroundColor(.orange)
+                         .font(.title2)
+                     VStack(alignment: .leading, spacing: 4) {
+                         Text("Push-up reminders")
+                             .font(.headline)
+                         Text("Get nudges if you are behind on your daily target.")
+                             .font(.caption)
+                             .foregroundColor(.secondary)
+                     }
+                 }
+ 
+                 Toggle("Enable daily reminders", isOn: $store.reminderEnabled)
+                 Text("When enabled, we will send a notification at each time you set below.")
+                     .font(.caption)
+                     .foregroundColor(.secondary)
+ 
+                 if store.reminderEnabled {
+                     VStack(alignment: .leading, spacing: 12) {
+                         Text("Reminder times")
+                             .font(.subheadline)
+                             .fontWeight(.semibold)
+-                        ForEach($store.reminderTimes, id: \.self) { $time in
++                        ForEach($store.reminderTimes) { $reminder in
+                             HStack {
+                                 DatePicker(
+                                     "Reminder",
+-                                    selection: $time,
++                                    selection: $reminder.time,
+                                     displayedComponents: .hourAndMinute
+                                 )
+                                 Button("Remove") {
+-                                    if let index = store.reminderTimes.firstIndex(of: time) {
++                                    if let index = store.reminderTimes.firstIndex(of: reminder) {
+                                         store.removeReminderTime(at: index)
+                                     }
+                                 }
+                                 .buttonStyle(.borderless)
+                             }
+                         }
+ 
+                         HStack {
+                             DatePicker("New reminder time", selection: $newReminderTime, displayedComponents: .hourAndMinute)
+                             Button("Add time") {
+                                 store.addReminderTime(newReminderTime)
+                             }
+                             .buttonStyle(.bordered)
+                         }
+                     }
+ 
+                     Button("Save reminders") {
+                         NotificationScheduler.updateReminder(store: store) { authorized in
+                             if !authorized {
+                                 store.reminderEnabled = false
+                                 showingNotificationAlert = true
+                                 reminderResultMessage = "Reminders not saved. Enable notifications in Settings."
+                                 showingReminderResult = true
+                             }
+                             if authorized {
+@@ -682,51 +696,51 @@ struct AdminView: View {
+ 
+     private var insightsSettingsSection: some View {
+         SectionCard(title: "Insights time frames") {
+             VStack(alignment: .leading, spacing: 12) {
+                 Text("Daily and weekly are always shown. Toggle additional ranges below.")
+                     .font(.caption)
+                     .foregroundColor(.secondary)
+                 Toggle("Show monthly", isOn: $store.showMonthly)
+                 Toggle("Show quarterly", isOn: $store.showQuarterly)
+                 Toggle("Show yearly", isOn: $store.showYearly)
+             }
+             .onChange(of: store.showMonthly) { _ in store.save() }
+             .onChange(of: store.showQuarterly) { _ in store.save() }
+             .onChange(of: store.showYearly) { _ in store.save() }
+         }
+     }
+ 
+     private func reminderStatusText() -> String {
+         guard store.reminderEnabled else {
+             return "Reminders are off."
+         }
+         if store.reminderTimes.isEmpty {
+             return "Add at least one reminder time."
+         }
+         let times = store.reminderTimes
+-            .map { $0.formatted(date: .omitted, time: .shortened) }
++            .map { $0.time.formatted(date: .omitted, time: .shortened) }
+             .joined(separator: ", ")
+         return "Reminders set for \(times)."
+     }
+ 
+ }
+ 
+ struct CameraView: View {
+     @Environment(\.dismiss) private var dismiss
+     @EnvironmentObject private var store: PushupStore
+     @State private var cameraCount: Int = 0
+     @State private var cameraStatus: String = "Not calibrated"
+     @State private var cameraDistance: Double?
+     @State private var showingCameraAlert = false
+     @State private var cameraAlertMessage = ""
+     @State private var isCounting: Bool = false
+ 
+     var body: some View {
+         ScrollView {
+             VStack(spacing: 20) {
+                 SectionCard(title: "Camera push-up counter") {
+                     VStack(alignment: .leading, spacing: 16) {
+                         Text("Use the iPhone TrueDepth camera to estimate face distance for push-up counting.")
+                             .font(.caption)
+                             .foregroundColor(.secondary)
+ 
+@@ -1089,53 +1103,54 @@ struct LineChart: View {
+                     }
+                 }
+                 .stroke(Color.blue, lineWidth: 2)
+ 
+                 ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                     Circle()
+                         .fill(Color.blue)
+                         .frame(width: 6, height: 6)
+                         .position(point)
+                 }
+             }
+         }
+         .frame(height: 180)
+     }
+ }
+ 
+ enum NotificationScheduler {
+     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
+         let center = UNUserNotificationCenter.current()
+         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+             DispatchQueue.main.async {
+                 if !granted {
+                     completion(false)
+                     return
+                 }
+-                center.removeAllPendingNotificationRequests()
++                let identifiers = store.reminderTimes.indices.map { "pushup-reminder-\($0)" }
++                center.removePendingNotificationRequests(withIdentifiers: identifiers)
+                 guard store.reminderEnabled, !store.reminderTimes.isEmpty else {
+                     completion(true)
+                     return
+                 }
+-                for (index, time) in store.reminderTimes.enumerated() {
++                for (index, reminder) in store.reminderTimes.enumerated() {
+                     let content = UNMutableNotificationContent()
+                     content.title = "Push-up Manager reminder"
+                     content.body = "Log your push-ups to stay on target today."
+ 
+-                    let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: time)
++                    let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.time)
+                     let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+                     let request = UNNotificationRequest(
+                         identifier: "pushup-reminder-\(index)",
+                         content: content,
+                         trigger: trigger
+                     )
+                     center.add(request)
+                 }
+                 completion(true)
+             }
+         }
+     }
+ }
+ 
+ extension Color {
+     static let blueSteel = Color(red: 0.27, green: 0.46, blue: 0.60)
+ }
