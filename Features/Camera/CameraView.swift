@@ -132,11 +132,7 @@ struct CameraView: View {
         } message: {
             Text("Save \(pendingSaveCount ?? 0) push-ups to your log?")
         }
-        .onChange(of: isCalibrated) {
-            if isCalibrated {
-                showCalibrationOverlay = false
-            }
-        }
+
     }
 
     private func stopCounting() {

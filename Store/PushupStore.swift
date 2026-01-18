@@ -208,6 +208,7 @@ final class PushupStore: ObservableObject {
     private func recalculateDailyTotals() {
         dailyTotalsCache = Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
             .mapValues { $0.reduce(0) { $0 + $1.count } }
+        recalculateCaches()
     }
     
     private var dailyTotals: [Date: Int] {
