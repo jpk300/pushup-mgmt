@@ -178,8 +178,8 @@ struct CameraPushupCounterView: UIViewRepresentable {
         }
 
         private func handleDistance(_ distance: Double) {
-            let nearThresholdMeters = 0.15
-            let toleranceMeters = 0.05
+            let nearThresholdMeters = 0.12
+            let toleranceMeters = 0.06
 
             if baselineDistance == nil {
                 baselineDistance = distance

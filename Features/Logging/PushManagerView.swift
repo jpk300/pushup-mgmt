@@ -64,11 +64,19 @@ struct PushManagerView: View {
     private var logSection: some View {
         SectionCard(title: "Log push-ups") {
             VStack(alignment: .leading, spacing: 16) {
-                NavigationLink("Log with camera") {
-                    CameraView()
-                        .environmentObject(store)
+                let isRestDayToday = store.isRestDay(Date())
+                HStack {
+                    NavigationLink("Log with camera") {
+                        CameraView()
+                            .environmentObject(store)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button(isRestDayToday ? "Cancel rest day" : "Rest day") {
+                        store.setRestDay(Date(), isRestDay: !isRestDayToday)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
 
                 HStack {
                     TextField("Push-ups completed", text: $logCount)
@@ -90,11 +98,18 @@ struct PushManagerView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
+                .disabled(isRestDayToday)
                 if let logErrorMessage {
                     Text(logErrorMessage)
                         .font(.caption)
                         .foregroundColor(.red)
                 }
+
+                if isRestDayToday {
+                      Text("Rest day selected. Push-ups are optional.")
+                          .font(.caption)
+                          .foregroundColor(.secondary)
+                  }
 
                 ProgressView(value: Double(store.total(for: Date())), total: Double(max(store.dailyTargetTotal(), 1)))
                 Text("\(store.total(for: Date())) / \(store.dailyTargetTotal())")
@@ -106,7 +121,7 @@ struct PushManagerView: View {
                         .foregroundColor(.secondary)
                     let todaysEntries = store.entries.filter { Calendar.current.isDateInToday($0.timestamp) }
                     if todaysEntries.isEmpty {
-                        Text("No sets logged yet today.")
+                        Text(isRestDayToday ? "Rest day logged." : "No sets logged yet today.")
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(todaysEntries.reversed()) { entry in

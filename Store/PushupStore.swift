@@ -26,6 +26,7 @@ final class PushupStore: ObservableObject {
     @Published var showMonthly: Bool = true
     @Published var showQuarterly: Bool = true
     @Published var showYearly: Bool = true
+    @Published var restDays: Set<Date> = []
     
     private let storageKey = "pushManagerStore"
     private var dailyTotalsCache: [Date: Int] = [:]
@@ -90,16 +91,41 @@ final class PushupStore: ObservableObject {
         
         var current = Date()
         var days = 0
-        while total(for: current) >= target {
-            days += 1
-            guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
-                break
+        while true {
+                    if isRestDay(current) {
+                        guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
+                            break
+                        }
+                        current = previous
+                        continue
             }
-            current = previous
+            if total(for: current) >= target {
+                            days += 1
+                            guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
+                                break
+                            }
+                            current = previous
+                            continue
+                        }
+                        break
         }
         return days
     }
     
+    func isRestDay(_ date: Date) -> Bool {
+        restDays.contains(Calendar.current.startOfDay(for: date))
+    }
+
+    func setRestDay(_ date: Date, isRestDay: Bool) {
+        let day = Calendar.current.startOfDay(for: date)
+        if isRestDay {
+            restDays.insert(day)
+        } else {
+            restDays.remove(day)
+        }
+        save()
+    }
+
     func totals(for range: RangeOption) -> [RangeEntry] {
         range.dates().map { date in
             RangeEntry(date: date, total: total(for: date))
@@ -159,7 +185,8 @@ final class PushupStore: ObservableObject {
             quietHoursEnd: quietHoursEnd,
             showMonthly: showMonthly,
             showQuarterly: showQuarterly,
-            showYearly: showYearly
+            showYearly: showYearly,
+            restDays: Array(restDays)
         )
         if let data = try? JSONEncoder().encode(payload) {
             UserDefaults.standard.set(data, forKey: storageKey)
@@ -190,6 +217,7 @@ final class PushupStore: ObservableObject {
         showMonthly = payload.showMonthly
         showQuarterly = payload.showQuarterly
         showYearly = payload.showYearly
+        restDays = Set(payload.restDays.map { Calendar.current.startOfDay(for: $0) })
         recalculateDailyTotals()
     }
     
@@ -247,7 +275,8 @@ struct StorePayload: Codable {
     var showMonthly: Bool
     var showQuarterly: Bool
     var showYearly: Bool
-
+    var restDays: [Date]
+    
     init(
         targetType: TargetType,
         dailyTarget: Int,
@@ -267,7 +296,8 @@ struct StorePayload: Codable {
         quietHoursEnd: Date,
         showMonthly: Bool,
         showQuarterly: Bool,
-        showYearly: Bool
+        showYearly: Bool,
+        restDays: [Date]
     ) {
         self.targetType = targetType
         self.dailyTarget = dailyTarget
@@ -288,6 +318,7 @@ struct StorePayload: Codable {
         self.showMonthly = showMonthly
         self.showQuarterly = showQuarterly
         self.showYearly = showYearly
+        self.restDays = restDays
     }
 
     init(from decoder: Decoder) throws {
@@ -307,6 +338,7 @@ struct StorePayload: Codable {
         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
+        restDays = (try? container.decode([Date].self, forKey: .restDays)) ?? []
         quietHoursEnabled = (try? container.decode(Bool.self, forKey: .quietHoursEnabled)) ?? false
         quietHoursStart = (try? container.decode(Date.self, forKey: .quietHoursStart)) ?? PushupStore.defaultQuietHoursStart()
         quietHoursEnd = (try? container.decode(Date.self, forKey: .quietHoursEnd)) ?? PushupStore.defaultQuietHoursEnd()
@@ -340,6 +372,7 @@ struct StorePayload: Codable {
         try container.encode(showMonthly, forKey: .showMonthly)
         try container.encode(showQuarterly, forKey: .showQuarterly)
         try container.encode(showYearly, forKey: .showYearly)
+        try container.encode(restDays, forKey: .restDays)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -363,5 +396,6 @@ struct StorePayload: Codable {
         case showMonthly
         case showQuarterly
         case showYearly
+        case restDays
     }
 }
