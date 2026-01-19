@@ -16,6 +16,9 @@ struct PushManagerView: View {
     @State private var editingEntry: PushupEntry?
     @State private var editCount: String = ""
     @State private var editErrorMessage: String?
+    @State private var showGoalCelebration: Bool = false
+    @State private var lastTrackedDay: Date = Calendar.current.startOfDay(for: Date())
+    @State private var lastTrackedTotal: Int = 0
     @FocusState private var isLogFieldFocused: Bool
     private var availableRanges: [RangeOption] {
         var ranges: [RangeOption] = [.daily, .weekly]
@@ -45,6 +48,18 @@ struct PushManagerView: View {
                     .foregroundColor(.blue)
                 }
             }
+        }
+        .onAppear {
+            lastTrackedDay = Calendar.current.startOfDay(for: Date())
+            lastTrackedTotal = store.total(for: Date())
+        }
+        .onChange(of: store.entries) {
+            evaluateGoalCelebration()
+        }
+        .alert("Goal achieved 🎉", isPresented: $showGoalCelebration) {
+            Button("Awesome!") {}
+        } message: {
+            Text("You hit your push-up target for today. Great work!")
         }
     }
 
@@ -251,5 +266,19 @@ struct PushManagerView: View {
         if !availableRanges.contains(rangeOption) {
             rangeOption = .weekly
         }
+    }
+
+    private func evaluateGoalCelebration() {
+        let today = Calendar.current.startOfDay(for: Date())
+        if today != lastTrackedDay {
+            lastTrackedDay = today
+            lastTrackedTotal = 0
+        }
+        let target = store.dailyTargetTotal()
+        let currentTotal = store.total(for: Date())
+        if target > 0, currentTotal >= target, lastTrackedTotal < target {
+            showGoalCelebration = true
+        }
+        lastTrackedTotal = currentTotal
     }
 }
