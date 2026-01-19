@@ -21,13 +21,15 @@ struct BarChart: View {
                         .frame(width: 70, alignment: .leading)
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Color.blue.opacity(0.2))
-                            Capsule().fill(Color.blue)
-                                .frame(width: geometry.size.width * CGFloat(entry.total) / CGFloat(maxValue))
+                            Capsule().fill(entry.isRestDay ? Color.gray.opacity(0.2) : Color.blue.opacity(0.2))
+                            if !entry.isRestDay {
+                                Capsule().fill(Color.blue)
+                                    .frame(width: geometry.size.width * CGFloat(entry.total) / CGFloat(maxValue))
+                            }
                         }
                     }
                     .frame(height: 8)
-                    Text("\(entry.total)")
+                    Text(entry.isRestDay ? "RD" : "\(entry.total)")
                         .font(.caption)
                         .frame(width: 32, alignment: .trailing)
                 }

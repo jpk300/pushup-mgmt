@@ -128,7 +128,7 @@ final class PushupStore: ObservableObject {
 
     func totals(for range: RangeOption) -> [RangeEntry] {
         range.dates().map { date in
-            RangeEntry(date: date, total: total(for: date))
+            RangeEntry(date: date, total: total(for: date), isRestDay: isRestDay(date))
         }
     }
     

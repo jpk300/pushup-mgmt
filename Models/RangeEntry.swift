@@ -12,4 +12,5 @@ struct RangeEntry: Identifiable {
     let id = UUID()
     let date: Date
     let total: Int
+    let isRestDay: Bool
 }
