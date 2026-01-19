@@ -58,6 +58,10 @@ struct CameraPushupCounterView: UIViewRepresentable {
         private let onPermissionResult: (String) -> Void
         private var baselineDistance: Double?
         private var isNear: Bool = false
+        private var calibrationSamples: [(time: Date, distance: Double)] = []
+        private var downCandidateStart: Date?
+        private var lastDownTime: Date?
+        private var lastRepTime: Date?
         private weak var session: ARSession?
         private weak var sceneView: ARSCNView?
         private weak var blurView: UIVisualEffectView?
@@ -178,13 +182,33 @@ struct CameraPushupCounterView: UIViewRepresentable {
         }
 
         private func handleDistance(_ distance: Double) {
-            let nearThresholdMeters = 0.12
-            let toleranceMeters = 0.06
+            let nearThresholdMeters = 0.20
+            let toleranceMeters = 0.04
+            let calibrationWindowSeconds: TimeInterval = 1.2
+            let calibrationMaxVariance = 0.02
+            let minCalibrationSamples = 20
+            let minDownHoldSeconds: TimeInterval = 0.2
+            let minRepDurationSeconds: TimeInterval = 0.5
 
             if baselineDistance == nil {
-                baselineDistance = distance
-                isCalibrated = true
-                statusText = "Calibrated at \(distance.formatted(.number.precision(.fractionLength(2)))) m. Begin push-ups."
+                let now = Date()
+                calibrationSamples.append((time: now, distance: distance))
+                calibrationSamples.removeAll { now.timeIntervalSince($0.time) > calibrationWindowSeconds }
+
+                if calibrationSamples.count >= minCalibrationSamples {
+                    let distances = calibrationSamples.map(\.distance).sorted()
+                    if let minDistance = distances.first, let maxDistance = distances.last,
+                       (maxDistance - minDistance) <= calibrationMaxVariance {
+                        let median = distances[distances.count / 2]
+                        baselineDistance = median
+                        isCalibrated = true
+                        calibrationSamples.removeAll()
+                        statusText = "Calibrated at \(median.formatted(.number.precision(.fractionLength(2)))) m. Begin push-ups."
+                        return
+                    }
+                }
+
+                statusText = "Hold still to calibrate."
                 return
             }
 
@@ -195,16 +219,34 @@ struct CameraPushupCounterView: UIViewRepresentable {
 
             guard let baselineDistance = baselineDistance else { return }
             let nearDistance = max(baselineDistance - nearThresholdMeters, 0.05)
+            let now = Date()
             if distance <= nearDistance && !isNear {
-                isNear = true
-                statusText = "Down position detected."
-            } else if distance >= baselineDistance - toleranceMeters && isNear {
-                isNear = false
-                count += 1
-                statusText = "Up position detected. Push-up counted."
-                showFlash = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.showFlash = false
+                if let downCandidateStart {
+                    if now.timeIntervalSince(downCandidateStart) >= minDownHoldSeconds {
+                        isNear = true
+                        lastDownTime = now
+                        downCandidateStart = nil
+                        statusText = "Down position detected."
+                    }
+                } else {
+                    downCandidateStart = now
+                }
+            } else if distance > nearDistance {
+                downCandidateStart = nil
+            }
+
+            if distance >= baselineDistance - toleranceMeters && isNear {
+                if let lastDownTime, now.timeIntervalSince(lastDownTime) >= minRepDurationSeconds {
+                    if lastRepTime == nil || now.timeIntervalSince(lastRepTime ?? now) >= minRepDurationSeconds {
+                        isNear = false
+                        lastRepTime = now
+                        count += 1
+                        statusText = "Up position detected. Push-up counted."
+                        showFlash = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            self.showFlash = false
+                        }
+                    }
                 }
             }
         }
@@ -213,6 +255,10 @@ struct CameraPushupCounterView: UIViewRepresentable {
             baselineDistance = nil
             isNear = false
             isCalibrated = false
+            calibrationSamples.removeAll()
+            downCandidateStart = nil
+            lastDownTime = nil
+            lastRepTime = nil
             statusText = "Not calibrated"
         }
     }
