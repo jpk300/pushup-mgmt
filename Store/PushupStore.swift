@@ -94,11 +94,12 @@ final class PushupStore: ObservableObject {
         let target = dailyTargetTotal(activity: activityType)
         guard target > 0 else { return 0 }
         
+        let calendar = Calendar.current
         var current = Date()
         var days = 0
         while true {
                     if isRestDay(current, activity: activityType) {
-                        guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
+                        guard let previous = calendar.date(byAdding: .day, value: -1, to: current) else {
                             break
                         }
                         current = previous
@@ -106,12 +107,19 @@ final class PushupStore: ObservableObject {
             }
             if total(for: current, activity: activityType) >= target {
                             days += 1
-                            guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
+                            guard let previous = calendar.date(byAdding: .day, value: -1, to: current) else {
                                 break
                             }
                             current = previous
                             continue
                         }
+            if calendar.isDateInToday(current) {
+                guard let previous = calendar.date(byAdding: .day, value: -1, to: current) else {
+                    break
+                }
+                current = previous
+                continue
+            }
                         break
         }
         return days
