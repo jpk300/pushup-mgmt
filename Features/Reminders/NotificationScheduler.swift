@@ -21,6 +21,7 @@ enum NotificationScheduler {
         let behindThresholdValue: Int
         let totalToday: Int
         let dailyTargetTotal: Int
+        let activityType: ActivityType
     }
     static func updateReminder(store: PushupStore, completion: @escaping (Bool) -> Void) {
         let center = UNUserNotificationCenter.current()
@@ -30,7 +31,7 @@ enum NotificationScheduler {
             // ✅ If reminders are OFF, do not request permission.
             if !snapshot.reminderEnabled {
                 let requests = await center.pendingNotificationRequests()
-                let identifiers = requests.map(\.identifier).filter { $0.hasPrefix("pushup-reminder-") }
+                let identifiers = requests.map(\.identifier).filter { $0.hasPrefix("pushup-reminder-") || $0.hasPrefix("activity-reminder-") }
                 center.removePendingNotificationRequests(withIdentifiers: identifiers)
                 await MainActor.run { completion(true) }
                 return
@@ -51,7 +52,7 @@ enum NotificationScheduler {
         let requests = await center.pendingNotificationRequests()
         let identifiers = requests
             .map(\.identifier)
-            .filter { $0.hasPrefix("pushup-reminder-") }
+            .filter { $0.hasPrefix("pushup-reminder-") || $0.hasPrefix("activity-reminder-") }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         await MainActor.run {
             let snapshot = reminderSnapshot(store: store)
@@ -75,13 +76,13 @@ enum NotificationScheduler {
             }
             for (index, reminder) in schedule.filtered.enumerated() {
                 let content = UNMutableNotificationContent()
-                content.title = "Push-up Manager reminder"
-                content.body = "Log your push-ups to stay on target today."
+                content.title = snapshot.activityType.reminderTitle
+                content.body = snapshot.activityType.reminderBody
 
                 let dateComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.time)
                 let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
                 let request = UNNotificationRequest(
-                    identifier: "pushup-reminder-\(index)",
+                    identifier: "activity-reminder-\(index)",
                     content: content,
                     trigger: trigger
                 )
@@ -118,7 +119,8 @@ enum NotificationScheduler {
             behindThresholdType: store.behindThresholdType,
             behindThresholdValue: store.behindThresholdValue,
             totalToday: store.total(for: Date()),
-            dailyTargetTotal: store.dailyTargetTotal()
+            dailyTargetTotal: store.dailyTargetTotal(),
+            activityType: store.selectedActivity
         )
     }
 

@@ -18,6 +18,7 @@ struct AdminView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
+                activitySection
                 targetSection
                 insightsSettingsSection
                 remindersSection
@@ -40,30 +41,38 @@ struct AdminView: View {
     private var targetSection: some View {
         SectionCard(title: "Set your daily target") {
             VStack(alignment: .leading, spacing: 16) {
-                Picker("Target type", selection: $store.targetType) {
+                Picker("Target type", selection: store.binding(for: \.targetType)) {
                     ForEach(TargetType.allCases) { type in
                         Text(type.label).tag(type)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                if store.targetType == .dailyTotal {
-                    Stepper(value: $store.dailyTarget, in: 1...1000) {
-                        Text("Daily push-up target: \(store.dailyTarget)")
+                if store.binding(for: \.targetType).wrappedValue == .dailyTotal {
+                    Stepper(value: store.binding(for: \.dailyTarget), in: 1...1000) {
+                        Text("Daily \(store.selectedActivity.noun) target: \(store.binding(for: \.dailyTarget).wrappedValue)")
                     }
                 } else {
-                    Stepper(value: $store.incrementSize, in: 1...200) {
-                        Text("Push-ups per set: \(store.incrementSize)")
+                    Stepper(value: store.binding(for: \.incrementSize), in: 1...200) {
+                        Text("\(store.selectedActivity.title) per set: \(store.binding(for: \.incrementSize).wrappedValue)")
                     }
-                    Stepper(value: $store.setsPerDay, in: 1...50) {
-                        Text("Sets per day: \(store.setsPerDay)")
+                    Stepper(value: store.binding(for: \.setsPerDay), in: 1...50) {
+                        Text("Sets per day: \(store.binding(for: \.setsPerDay).wrappedValue)")
                     }
                 }
             }
-            .onChange(of: store.targetType) { store.save() }
-            .onChange(of: store.dailyTarget) { store.save() }
-            .onChange(of: store.incrementSize) { store.save() }
-            .onChange(of: store.setsPerDay) { store.save() }
+            .onChange(of: store.selectedActivity) { store.save() }
+        }
+    }
+
+    private var activitySection: some View {
+        SectionCard(title: "Activity") {
+            Picker("Activity", selection: $store.selectedActivity) {
+                ForEach(ActivityType.allCases) { activity in
+                    Text(activity.title).tag(activity)
+                }
+            }
+            .pickerStyle(.segmented)
         }
     }
 
@@ -75,7 +84,7 @@ struct AdminView: View {
                         .foregroundColor(.orange)
                         .font(.title2)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Push-up reminders")
+                        Text("\(store.selectedActivity.title) reminders")
                             .font(.headline)
                         Text("Get nudges if you are behind on your daily target.")
                             .font(.caption)
@@ -162,7 +171,7 @@ struct AdminView: View {
                                 }
                             } else {
                                 Stepper(value: $store.behindThresholdValue, in: 1...1000) {
-                                    Text("Behind by \(store.behindThresholdValue) push-ups")
+                                    Text("Behind by \(store.behindThresholdValue) \(store.selectedActivity.noun)")
                                 }
                             }
                         }
@@ -320,7 +329,7 @@ struct AdminView: View {
         case .percent:
             return " Only if below \(store.behindThresholdValue)% of target."
         case .count:
-            return " Only if below \(store.behindThresholdValue) push-ups."
+            return " Only if below \(store.behindThresholdValue) \(store.selectedActivity.noun)."
         }
     }
 

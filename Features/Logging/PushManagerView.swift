@@ -32,13 +32,14 @@ struct PushManagerView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    activitySwitcher
                     heroSection
                     logSection
                     insightsSection
                 }
                 .padding()
             }
-            .navigationTitle("Push-Up Tracker")
+            .navigationTitle("\(store.selectedActivity.title) Tracker")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink("Settings") {
@@ -53,19 +54,36 @@ struct PushManagerView: View {
             lastTrackedDay = Calendar.current.startOfDay(for: Date())
             lastTrackedTotal = store.total(for: Date())
         }
+        .onChange(of: store.selectedActivity) {
+            lastTrackedDay = Calendar.current.startOfDay(for: Date())
+            lastTrackedTotal = store.total(for: Date())
+            logCount = ""
+            logErrorMessage = nil
+        }
         .onChange(of: store.entries) {
             evaluateGoalCelebration()
         }
         .alert("Goal achieved 🎉", isPresented: $showGoalCelebration) {
             Button("Awesome!") {}
         } message: {
-            Text("You hit your push-up target for today. Great work!")
+            Text("You hit your \(store.selectedActivity.noun) target for today. Great work!")
+        }
+    }
+
+    private var activitySwitcher: some View {
+        SectionCard(title: "Activity") {
+            Picker("Activity", selection: $store.selectedActivity) {
+                ForEach(ActivityType.allCases) { activity in
+                    Text(activity.title).tag(activity)
+                }
+            }
+            .pickerStyle(.segmented)
         }
     }
 
     private var heroSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Stay on track with daily push-ups.")
+            Text("Stay on track with daily \(store.selectedActivity.noun).")
                 .font(.title2)
                 .fontWeight(.semibold)
             HStack(spacing: 16) {
@@ -77,15 +95,17 @@ struct PushManagerView: View {
     }
 
     private var logSection: some View {
-        SectionCard(title: "Log push-ups") {
+        SectionCard(title: "Log \(store.selectedActivity.noun)") {
             VStack(alignment: .leading, spacing: 16) {
                 let isRestDayToday = store.isRestDay(Date())
                 HStack {
-                    NavigationLink("Log with camera") {
-                        CameraView()
-                            .environmentObject(store)
+                    if store.selectedActivity == .pushups {
+                        NavigationLink("Log with camera") {
+                            CameraView()
+                                .environmentObject(store)
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                     
                     Button(isRestDayToday ? "Cancel rest day" : "Rest day") {
                         store.setRestDay(Date(), isRestDay: !isRestDayToday)
@@ -94,7 +114,7 @@ struct PushManagerView: View {
                 }
 
                 HStack {
-                    TextField("Push-ups completed", text: $logCount)
+                    TextField("\(store.selectedActivity.title) completed", text: $logCount)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .focused($isLogFieldFocused)
@@ -121,7 +141,7 @@ struct PushManagerView: View {
                 }
 
                 if isRestDayToday {
-                      Text("Rest day selected. Push-ups are optional.")
+                      Text("Rest day selected. \(store.selectedActivity.title) are optional.")
                           .font(.caption)
                           .foregroundColor(.secondary)
                   }
@@ -134,14 +154,16 @@ struct PushManagerView: View {
                     Text("Today")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                    let todaysEntries = store.entries.filter { Calendar.current.isDateInToday($0.timestamp) }
+                    let todaysEntries = store.entries.filter {
+                        $0.activityType == store.selectedActivity && Calendar.current.isDateInToday($0.timestamp)
+                    }
                     if todaysEntries.isEmpty {
                         Text(isRestDayToday ? "Rest day logged." : "No sets logged yet today.")
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(todaysEntries.reversed()) { entry in
                             HStack {
-                                Text("\(entry.count) push-ups")
+                                Text("\(entry.count) \(store.selectedActivity.noun)")
                                 Spacer()
                                 Text(entry.timestamp, style: .time)
                                     .foregroundColor(.secondary)
@@ -172,7 +194,7 @@ struct PushManagerView: View {
             NavigationStack {
                 Form {
                     Section(header: Text("Update set")) {
-                        TextField("Push-ups", text: $editCount)
+                        TextField(store.selectedActivity.title, text: $editCount)
                             .keyboardType(.numberPad)
                             .onChange(of: editCount) {
                                 editErrorMessage = nil
@@ -228,7 +250,7 @@ struct PushManagerView: View {
                 .onChange(of: store.showQuarterly) { ensureValidRangeSelection() }
                 .onChange(of: store.showYearly) { ensureValidRangeSelection() }
 
-                let totals = store.cachedTotals[rangeOption] ?? []
+                let totals = store.totals(for: rangeOption)
                 let sum = totals.reduce(0) { $0 + $1.total }
                 let average = totals.isEmpty ? 0 : Int(round(Double(sum) / Double(totals.count)))
 
@@ -252,7 +274,7 @@ struct PushManagerView: View {
                     }
                 }
 
-                let chartEntries = store.cachedChartEntries[rangeOption] ?? []
+                let chartEntries = store.chartEntries(for: rangeOption)
                 if rangeOption == .monthly || rangeOption == .quarterly || rangeOption == .yearly {
                     LineChart(entries: chartEntries)
                 } else {

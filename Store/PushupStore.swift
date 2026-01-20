@@ -3,10 +3,11 @@ import SwiftUI
 
 @MainActor
 final class PushupStore: ObservableObject {
-    @Published var targetType: TargetType = .dailyTotal
-    @Published var dailyTarget: Int = 50
-    @Published var incrementSize: Int = 10
-    @Published var setsPerDay: Int = 5
+    @Published var selectedActivity: ActivityType = .pushups
+    @Published private var activitySettings: [ActivityType: ActivitySettings] = [
+        .pushups: ActivitySettings.defaults(for: .pushups),
+        .situps: ActivitySettings.defaults(for: .situps)
+    ]
     @Published var entries: [PushupEntry] = [] {
         didSet {
             recalculateDailyTotals()
@@ -26,10 +27,8 @@ final class PushupStore: ObservableObject {
     @Published var showMonthly: Bool = true
     @Published var showQuarterly: Bool = true
     @Published var showYearly: Bool = true
-    @Published var restDays: Set<Date> = []
-    
     private let storageKey = "pushManagerStore"
-    private var dailyTotalsCache: [Date: Int] = [:]
+    private var dailyTotalsCache: [ActivityType: [Date: Int]] = [:]
     
     static func defaultReminderTime() -> Date {
         Calendar.current.date(bySettingHour: 19, minute: 0, second: 0, of: Date()) ?? Date()
@@ -47,12 +46,15 @@ final class PushupStore: ObservableObject {
         Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
     }
     
-    func dailyTargetTotal() -> Int {
-        targetType == .incremental ? incrementSize * setsPerDay : dailyTarget
+    func dailyTargetTotal(activity: ActivityType? = nil) -> Int {
+        let activityType = activity ?? selectedActivity
+        let settings = settings(for: activityType)
+        return settings.targetType == .incremental ? settings.incrementSize * settings.setsPerDay : settings.dailyTarget
     }
     
-    func addEntry(count: Int) {
-        entries.append(PushupEntry(count: count, timestamp: Date()))
+    func addEntry(count: Int, activity: ActivityType? = nil) {
+        let activityType = activity ?? selectedActivity
+        entries.append(PushupEntry(count: count, timestamp: Date(), activityType: activityType))
 
         func trimOldEntries() {
             let cutoff = Calendar.current.date(byAdding: .day, value: -365, to: Date()) ?? Date()
@@ -66,7 +68,8 @@ final class PushupStore: ObservableObject {
     
     func updateEntry(id: UUID, count: Int) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp)
+        let activityType = entries[index].activityType
+        entries[index] = PushupEntry(id: id, count: count, timestamp: entries[index].timestamp, activityType: activityType)
         save()
         guard reminderEnabled else { return }
         NotificationScheduler.updateReminder(store: self) { _ in }
@@ -80,26 +83,28 @@ final class PushupStore: ObservableObject {
     }
     
     
-    func total(for day: Date) -> Int {
+    func total(for day: Date, activity: ActivityType? = nil) -> Int {
+        let activityType = activity ?? selectedActivity
         let dayStart = Calendar.current.startOfDay(for: day)
-        return dailyTotals[dayStart] ?? 0
+        return dailyTotalsCache[activityType]?[dayStart] ?? 0
     }
     
-    func streak() -> Int {
-        let target = dailyTargetTotal()
+    func streak(activity: ActivityType? = nil) -> Int {
+        let activityType = activity ?? selectedActivity
+        let target = dailyTargetTotal(activity: activityType)
         guard target > 0 else { return 0 }
         
         var current = Date()
         var days = 0
         while true {
-                    if isRestDay(current) {
+                    if isRestDay(current, activity: activityType) {
                         guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
                             break
                         }
                         current = previous
                         continue
             }
-            if total(for: current) >= target {
+            if total(for: current, activity: activityType) >= target {
                             days += 1
                             guard let previous = Calendar.current.date(byAdding: .day, value: -1, to: current) else {
                                 break
@@ -112,40 +117,49 @@ final class PushupStore: ObservableObject {
         return days
     }
     
-    func isRestDay(_ date: Date) -> Bool {
-        restDays.contains(Calendar.current.startOfDay(for: date))
+    func isRestDay(_ date: Date, activity: ActivityType? = nil) -> Bool {
+        let activityType = activity ?? selectedActivity
+        let settings = settings(for: activityType)
+        let restDays = Set(settings.restDays.map { Calendar.current.startOfDay(for: $0) })
+        return restDays.contains(Calendar.current.startOfDay(for: date))
     }
 
-    func setRestDay(_ date: Date, isRestDay: Bool) {
+    func setRestDay(_ date: Date, isRestDay: Bool, activity: ActivityType? = nil) {
+        let activityType = activity ?? selectedActivity
         let day = Calendar.current.startOfDay(for: date)
-        if isRestDay {
-            restDays.insert(day)
-        } else {
-            restDays.remove(day)
+        updateSettings(for: activityType) { settings in
+            var restDays = Set(settings.restDays.map { Calendar.current.startOfDay(for: $0) })
+            if isRestDay {
+                restDays.insert(day)
+            } else {
+                restDays.remove(day)
+            }
+            settings.restDays = Array(restDays)
         }
-        save()
     }
 
-    func totals(for range: RangeOption) -> [RangeEntry] {
-        range.dates().map { date in
-            RangeEntry(date: date, total: total(for: date), isRestDay: isRestDay(date))
+    func totals(for range: RangeOption, activity: ActivityType? = nil) -> [RangeEntry] {
+        let activityType = activity ?? selectedActivity
+        return range.dates().map { date in
+            RangeEntry(date: date, total: total(for: date, activity: activityType), isRestDay: isRestDay(date, activity: activityType))
         }
     }
     
-    func chartEntries(for range: RangeOption) -> [ChartEntry] {
+    func chartEntries(for range: RangeOption, activity: ActivityType? = nil) -> [ChartEntry] {
+        let activityType = activity ?? selectedActivity
         switch range {
         case .daily, .weekly, .monthly:
-            return totals(for: range).map { entry in
+            return totals(for: range, activity: activityType).map { entry in
                 ChartEntry(date: entry.date, value: Double(entry.total))
             }
         case .quarterly:
-            return averagedEntries(range: range, bucketSize: 7)
+            return averagedEntries(range: range, bucketSize: 7, activity: activityType)
         case .yearly:
-            return averagedEntries(range: range, bucketSize: 14)
+            return averagedEntries(range: range, bucketSize: 14, activity: activityType)
         }
     }
     
-    private func averagedEntries(range: RangeOption, bucketSize: Int) -> [ChartEntry] {
+    private func averagedEntries(range: RangeOption, bucketSize: Int, activity: ActivityType) -> [ChartEntry] {
         let dates = range.dates()
         guard !dates.isEmpty else { return [] }
         var results: [ChartEntry] = []
@@ -154,7 +168,7 @@ final class PushupStore: ObservableObject {
             let end = min(index + bucketSize, dates.count)
             let bucket = dates[index..<end]
             let sum = bucket.reduce(0) { partial, date in
-                partial + total(for: date)
+                partial + total(for: date, activity: activity)
             }
             let average = Double(sum) / Double(bucket.count)
             if let bucketDate = bucket.last {
@@ -167,10 +181,8 @@ final class PushupStore: ObservableObject {
     
     func save() {
         let payload = StorePayload(
-            targetType: targetType,
-            dailyTarget: dailyTarget,
-            incrementSize: incrementSize,
-            setsPerDay: setsPerDay,
+            selectedActivity: selectedActivity,
+            activitySettings: activitySettings,
             entries: entries,
             reminderEnabled: reminderEnabled,
             reminderTimes: reminderTimes,
@@ -185,8 +197,7 @@ final class PushupStore: ObservableObject {
             quietHoursEnd: quietHoursEnd,
             showMonthly: showMonthly,
             showQuarterly: showQuarterly,
-            showYearly: showYearly,
-            restDays: Array(restDays)
+            showYearly: showYearly
         )
         if let data = try? JSONEncoder().encode(payload) {
             UserDefaults.standard.set(data, forKey: storageKey)
@@ -198,10 +209,8 @@ final class PushupStore: ObservableObject {
               let payload = try? JSONDecoder().decode(StorePayload.self, from: data) else {
             return
         }
-        targetType = payload.targetType
-        dailyTarget = payload.dailyTarget
-        incrementSize = payload.incrementSize
-        setsPerDay = payload.setsPerDay
+        selectedActivity = payload.selectedActivity
+        activitySettings = payload.activitySettings
         entries = payload.entries
         reminderEnabled = payload.reminderEnabled
         reminderTimes = payload.reminderTimes
@@ -217,7 +226,6 @@ final class PushupStore: ObservableObject {
         showMonthly = payload.showMonthly
         showQuarterly = payload.showQuarterly
         showYearly = payload.showYearly
-        restDays = Set(payload.restDays.map { Calendar.current.startOfDay(for: $0) })
         recalculateDailyTotals()
     }
     
@@ -234,32 +242,43 @@ final class PushupStore: ObservableObject {
     }
     
     private func recalculateDailyTotals() {
-        dailyTotalsCache = Dictionary(grouping: entries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
-            .mapValues { $0.reduce(0) { $0 + $1.count } }
-        recalculateCaches()
-    }
-    
-    private var dailyTotals: [Date: Int] {
-        dailyTotalsCache
-    }
-    
-    @Published private(set) var cachedTotals: [RangeOption: [RangeEntry]] = [:]
-    @Published private(set) var cachedChartEntries: [RangeOption: [ChartEntry]] = [:]
-
-    private func recalculateCaches() {
-        RangeOption.allCases.forEach { option in
-            cachedTotals[option] = totals(for: option)
-            cachedChartEntries[option] = chartEntries(for: option)
+        var totalsByActivity: [ActivityType: [Date: Int]] = [:]
+        let grouped = Dictionary(grouping: entries, by: { $0.activityType })
+        for (activity, activityEntries) in grouped {
+            totalsByActivity[activity] = Dictionary(grouping: activityEntries, by: { Calendar.current.startOfDay(for: $0.timestamp) })
+                .mapValues { $0.reduce(0) { $0 + $1.count } }
         }
+        dailyTotalsCache = totalsByActivity
+    }
+
+    func settings(for activity: ActivityType) -> ActivitySettings {
+        activitySettings[activity] ?? ActivitySettings.defaults(for: activity)
+    }
+
+    func updateSettings(for activity: ActivityType, update: (inout ActivitySettings) -> Void) {
+        var settings = activitySettings[activity] ?? ActivitySettings.defaults(for: activity)
+        update(&settings)
+        activitySettings[activity] = settings
+        objectWillChange.send()
+        save()
+    }
+
+    func binding<T>(for keyPath: WritableKeyPath<ActivitySettings, T>) -> Binding<T> {
+        Binding(
+            get: { self.settings(for: self.selectedActivity)[keyPath: keyPath] },
+            set: { newValue in
+                self.updateSettings(for: self.selectedActivity) { settings in
+                    settings[keyPath: keyPath] = newValue
+                }
+            }
+        )
     }
 
 }
 
 struct StorePayload: Codable {
-    var targetType: TargetType
-    var dailyTarget: Int
-    var incrementSize: Int
-    var setsPerDay: Int
+    var selectedActivity: ActivityType
+    var activitySettings: [ActivityType: ActivitySettings]
     var entries: [PushupEntry]
     var reminderEnabled: Bool
     var reminderTimes: [ReminderTime]
@@ -275,13 +294,10 @@ struct StorePayload: Codable {
     var showMonthly: Bool
     var showQuarterly: Bool
     var showYearly: Bool
-    var restDays: [Date]
     
     init(
-        targetType: TargetType,
-        dailyTarget: Int,
-        incrementSize: Int,
-        setsPerDay: Int,
+        selectedActivity: ActivityType,
+        activitySettings: [ActivityType: ActivitySettings],
         entries: [PushupEntry],
         reminderEnabled: Bool,
         reminderTimes: [ReminderTime],
@@ -296,13 +312,10 @@ struct StorePayload: Codable {
         quietHoursEnd: Date,
         showMonthly: Bool,
         showQuarterly: Bool,
-        showYearly: Bool,
-        restDays: [Date]
+        showYearly: Bool
     ) {
-        self.targetType = targetType
-        self.dailyTarget = dailyTarget
-        self.incrementSize = incrementSize
-        self.setsPerDay = setsPerDay
+        self.selectedActivity = selectedActivity
+        self.activitySettings = activitySettings
         self.entries = entries
         self.reminderEnabled = reminderEnabled
         self.reminderTimes = reminderTimes
@@ -318,15 +331,29 @@ struct StorePayload: Codable {
         self.showMonthly = showMonthly
         self.showQuarterly = showQuarterly
         self.showYearly = showYearly
-        self.restDays = restDays
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        targetType = try container.decode(TargetType.self, forKey: .targetType)
-        dailyTarget = try container.decode(Int.self, forKey: .dailyTarget)
-        incrementSize = try container.decode(Int.self, forKey: .incrementSize)
-        setsPerDay = try container.decode(Int.self, forKey: .setsPerDay)
+        selectedActivity = (try? container.decode(ActivityType.self, forKey: .selectedActivity)) ?? .pushups
+        if let decodedSettings = try? container.decode([ActivityType: ActivitySettings].self, forKey: .activitySettings) {
+            activitySettings = decodedSettings
+        } else {
+            let legacyTargetType = (try? container.decode(TargetType.self, forKey: .targetType)) ?? .dailyTotal
+            let legacyDailyTarget = (try? container.decode(Int.self, forKey: .dailyTarget)) ?? 50
+            let legacyIncrementSize = (try? container.decode(Int.self, forKey: .incrementSize)) ?? 10
+            let legacySetsPerDay = (try? container.decode(Int.self, forKey: .setsPerDay)) ?? 5
+            activitySettings = [
+                .pushups: ActivitySettings(
+                    targetType: legacyTargetType,
+                    dailyTarget: legacyDailyTarget,
+                    incrementSize: legacyIncrementSize,
+                    setsPerDay: legacySetsPerDay,
+                    restDays: (try? container.decode([Date].self, forKey: .restDays)) ?? []
+                ),
+                .situps: ActivitySettings.defaults(for: .situps)
+            ]
+        }
         entries = try container.decode([PushupEntry].self, forKey: .entries)
         reminderEnabled = try container.decode(Bool.self, forKey: .reminderEnabled)
         useIntervalReminders = (try? container.decode(Bool.self, forKey: .useIntervalReminders)) ?? false
@@ -338,7 +365,6 @@ struct StorePayload: Codable {
         showMonthly = (try? container.decode(Bool.self, forKey: .showMonthly)) ?? true
         showQuarterly = (try? container.decode(Bool.self, forKey: .showQuarterly)) ?? true
         showYearly = (try? container.decode(Bool.self, forKey: .showYearly)) ?? true
-        restDays = (try? container.decode([Date].self, forKey: .restDays)) ?? []
         quietHoursEnabled = (try? container.decode(Bool.self, forKey: .quietHoursEnabled)) ?? false
         quietHoursStart = (try? container.decode(Date.self, forKey: .quietHoursStart)) ?? PushupStore.defaultQuietHoursStart()
         quietHoursEnd = (try? container.decode(Date.self, forKey: .quietHoursEnd)) ?? PushupStore.defaultQuietHoursEnd()
@@ -353,10 +379,8 @@ struct StorePayload: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(targetType, forKey: .targetType)
-        try container.encode(dailyTarget, forKey: .dailyTarget)
-        try container.encode(incrementSize, forKey: .incrementSize)
-        try container.encode(setsPerDay, forKey: .setsPerDay)
+        try container.encode(selectedActivity, forKey: .selectedActivity)
+        try container.encode(activitySettings, forKey: .activitySettings)
         try container.encode(entries, forKey: .entries)
         try container.encode(reminderEnabled, forKey: .reminderEnabled)
         try container.encode(reminderTimes, forKey: .reminderTimes)
@@ -372,10 +396,11 @@ struct StorePayload: Codable {
         try container.encode(showMonthly, forKey: .showMonthly)
         try container.encode(showQuarterly, forKey: .showQuarterly)
         try container.encode(showYearly, forKey: .showYearly)
-        try container.encode(restDays, forKey: .restDays)
     }
 
     enum CodingKeys: String, CodingKey {
+        case selectedActivity
+        case activitySettings
         case targetType
         case dailyTarget
         case incrementSize

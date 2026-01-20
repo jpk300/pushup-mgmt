@@ -221,11 +221,11 @@ struct CameraPushupCounterView: UIViewRepresentable {
             let nearDistance = max(baselineDistance - nearThresholdMeters, 0.05)
             let now = Date()
             if distance <= nearDistance && !isNear {
-                if let downCandidateStart {
+                if let downCandidateStart = downCandidateStart {
                     if now.timeIntervalSince(downCandidateStart) >= minDownHoldSeconds {
                         isNear = true
                         lastDownTime = now
-                        downCandidateStart = nil
+                    self.downCandidateStart = nil                        
                         statusText = "Down position detected."
                     }
                 } else {

@@ -19,7 +19,7 @@ enum BehindThresholdType: String, CaseIterable, Codable, Identifiable {
         case .percent:
             return "Percent of target"
         case .count:
-            return "Push-up count"
+            return "Rep count"
         }
     }
 }
