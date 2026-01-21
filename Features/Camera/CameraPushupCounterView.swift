@@ -62,6 +62,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
         private var downCandidateStart: Date?
         private var lastDownTime: Date?
         private var lastRepTime: Date?
+        private var smoothedDistance: Double?
         private weak var session: ARSession?
         private weak var sceneView: ARSCNView?
         private weak var blurView: UIVisualEffectView?
@@ -182,17 +183,24 @@ struct CameraPushupCounterView: UIViewRepresentable {
         }
 
         private func handleDistance(_ distance: Double) {
-            let nearThresholdMeters = 0.20
-            let toleranceMeters = 0.04
             let calibrationWindowSeconds: TimeInterval = 1.2
-            let calibrationMaxVariance = 0.02
+            let calibrationMaxVariance = 0.025
             let minCalibrationSamples = 20
-            let minDownHoldSeconds: TimeInterval = 0.2
-            let minRepDurationSeconds: TimeInterval = 0.5
+            let minDownHoldSeconds: TimeInterval = 0.15
+            let minRepDurationSeconds: TimeInterval = 0.45
+            let smoothingWeight = 0.2
+
+            if let smoothedDistance {
+                self.smoothedDistance = (smoothingWeight * distance) + ((1 - smoothingWeight) * smoothedDistance)
+            } else {
+                smoothedDistance = distance
+            }
+
+            let effectiveDistance = smoothedDistance ?? distance
 
             if baselineDistance == nil {
                 let now = Date()
-                calibrationSamples.append((time: now, distance: distance))
+                calibrationSamples.append((time: now, distance: effectiveDistance))
                 calibrationSamples.removeAll { now.timeIntervalSince($0.time) > calibrationWindowSeconds }
 
                 if calibrationSamples.count >= minCalibrationSamples {
@@ -218,24 +226,26 @@ struct CameraPushupCounterView: UIViewRepresentable {
             }
 
             guard let baselineDistance = baselineDistance else { return }
-            let nearDistance = max(baselineDistance - nearThresholdMeters, 0.05)
+            let downDelta = max(0.05, min(0.15, baselineDistance * 0.08))
+            let upTolerance = max(0.015, baselineDistance * 0.03)
+            let nearDistance = max(baselineDistance - downDelta, 0.05)
             let now = Date()
-            if distance <= nearDistance && !isNear {
+            if effectiveDistance <= nearDistance && !isNear {
                 if let downCandidateStart = downCandidateStart {
                     if now.timeIntervalSince(downCandidateStart) >= minDownHoldSeconds {
                         isNear = true
                         lastDownTime = now
-                    self.downCandidateStart = nil                        
+                        self.downCandidateStart = nil
                         statusText = "Down position detected."
                     }
                 } else {
                     downCandidateStart = now
                 }
-            } else if distance > nearDistance {
+            } else if effectiveDistance > nearDistance {
                 downCandidateStart = nil
             }
 
-            if distance >= baselineDistance - toleranceMeters && isNear {
+            if effectiveDistance >= baselineDistance - upTolerance && isNear {
                 if let lastDownTime, now.timeIntervalSince(lastDownTime) >= minRepDurationSeconds {
                     if lastRepTime == nil || now.timeIntervalSince(lastRepTime ?? now) >= minRepDurationSeconds {
                         isNear = false
@@ -256,6 +266,7 @@ struct CameraPushupCounterView: UIViewRepresentable {
             isNear = false
             isCalibrated = false
             calibrationSamples.removeAll()
+            smoothedDistance = nil
             downCandidateStart = nil
             lastDownTime = nil
             lastRepTime = nil
