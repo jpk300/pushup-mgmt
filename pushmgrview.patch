@@ -1,9 +1,64 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/Features/Logging/PushManagerView.swift b/Features/Logging/PushManagerView.swift
-index 5410511b2c5f443fcf90641b201e33c2f7d163a8..9959f1247ce337dc20f7cb3bfb876d12d1546c8e 100644
+index 9959f1247ce337dc20f7cb3bfb876d12d1546c8e..51ca90ded6d8692b4d5bcfbaaac4b08df7e4c9cc 100644
 --- a/Features/Logging/PushManagerView.swift
 +++ b/Features/Logging/PushManagerView.swift
-@@ -230,51 +230,53 @@ struct PushManagerView: View {
+@@ -124,51 +124,53 @@ struct PushManagerView: View {
+                     Button("Add set") {
+                         guard let count = Int(logCount), count > 0 else {
+                             logErrorMessage = "Enter a number greater than zero."
+                             return
+                         }
+                         store.addEntry(count: count)
+                         logCount = ""
+                         logErrorMessage = nil
+                         isLogFieldFocused = false
+                     }
+                     .buttonStyle(.borderedProminent)
+                 }
+                 .disabled(isRestDayToday)
+                 if let logErrorMessage {
+                     Text(logErrorMessage)
+                         .font(.caption)
+                         .foregroundColor(.red)
+                 }
+ 
+                 if isRestDayToday {
+                       Text("Rest day selected. \(store.selectedActivity.title) are optional.")
+                           .font(.caption)
+                           .foregroundColor(.secondary)
+                   }
+ 
+-                ProgressView(value: Double(store.total(for: Date())), total: Double(max(store.dailyTargetTotal(), 1)))
++                let dailyTarget = max(store.dailyTargetTotal(), 1)
++                let currentTotal = min(store.total(for: Date()), dailyTarget)
++                ProgressView(value: Double(currentTotal), total: Double(dailyTarget))
+                 Text("\(store.total(for: Date())) / \(store.dailyTargetTotal())")
+                     .font(.headline)
+ 
+                 VStack(alignment: .leading, spacing: 8) {
+                     Text("Today")
+                         .font(.subheadline)
+                         .foregroundColor(.secondary)
+                     let todaysEntries = store.entries.filter {
+                         $0.activityType == store.selectedActivity && Calendar.current.isDateInToday($0.timestamp)
+                     }
+                     if todaysEntries.isEmpty {
+                         Text(isRestDayToday ? "Rest day logged." : "No sets logged yet today.")
+                             .foregroundColor(.secondary)
+                     } else {
+                         ForEach(todaysEntries.reversed()) { entry in
+                             HStack {
+                                 Text("\(entry.count) \(store.selectedActivity.noun)")
+                                 Spacer()
+                                 Text(entry.timestamp, style: .time)
+                                     .foregroundColor(.secondary)
+                                 Button("Edit") {
+                                     editingEntry = entry
+                                     editCount = "\(entry.count)"
+                                 }
+                                 .buttonStyle(.borderless)
+@@ -230,53 +232,51 @@ struct PushManagerView: View {
                          }
                      }
                  }
@@ -29,10 +84,10 @@ index 5410511b2c5f443fcf90641b201e33c2f7d163a8..9959f1247ce337dc20f7cb3bfb876d12
  
                  let totals = store.totals(for: rangeOption)
                  let sum = totals.reduce(0) { $0 + $1.total }
--                let average = totals.isEmpty ? 0 : Int(round(Double(sum) / Double(totals.count)))
-+                let nonRestTotals = totals.filter { !$0.isRestDay }
-+                let nonRestSum = nonRestTotals.reduce(0) { $0 + $1.total }
-+                let average = nonRestTotals.isEmpty ? 0 : Int(round(Double(nonRestSum) / Double(nonRestTotals.count)))
+-                let nonRestTotals = totals.filter { !$0.isRestDay }
+-                let nonRestSum = nonRestTotals.reduce(0) { $0 + $1.total }
+-                let average = nonRestTotals.isEmpty ? 0 : Int(round(Double(nonRestSum) / Double(nonRestTotals.count)))
++                let average = store.averagePerDay(for: rangeOption)
  
                  HStack {
                      VStack(alignment: .leading) {

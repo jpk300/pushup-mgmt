@@ -152,6 +152,17 @@ final class PushupStore: ObservableObject {
             RangeEntry(date: date, total: total(for: date, activity: activityType), isRestDay: isRestDay(date, activity: activityType))
         }
     }
+
+    func averagePerDay(for range: RangeOption, activity: ActivityType? = nil) -> Int {
+        let activityType = activity ?? selectedActivity
+        let dates = range.dates()
+        let nonRestDates = dates.filter { !isRestDay($0, activity: activityType) }
+        let sum = nonRestDates.reduce(0) { partial, date in
+            partial + total(for: date, activity: activityType)
+        }
+        guard !nonRestDates.isEmpty else { return 0 }
+        return Int(round(Double(sum) / Double(nonRestDates.count)))
+    }
     
     func chartEntries(for range: RangeOption, activity: ActivityType? = nil) -> [ChartEntry] {
         let activityType = activity ?? selectedActivity
