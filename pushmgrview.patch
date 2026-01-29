@@ -1,6 +1,6 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/Features/Logging/PushManagerView.swift b/Features/Logging/PushManagerView.swift
-index 9959f1247ce337dc20f7cb3bfb876d12d1546c8e..51ca90ded6d8692b4d5bcfbaaac4b08df7e4c9cc 100644
+index a8a478637c367d0bb47d06ba6c0ccf3a9ca5c4f8..d43f92e0906c9929767b7772f3e9c477f256f4a0 100644
 --- a/Features/Logging/PushManagerView.swift
 +++ b/Features/Logging/PushManagerView.swift
 @@ -124,51 +124,53 @@ struct PushManagerView: View {
@@ -31,7 +31,7 @@ index 9959f1247ce337dc20f7cb3bfb876d12d1546c8e..51ca90ded6d8692b4d5bcfbaaac4b08d
  
 -                ProgressView(value: Double(store.total(for: Date())), total: Double(max(store.dailyTargetTotal(), 1)))
 +                let dailyTarget = max(store.dailyTargetTotal(), 1)
-+                let currentTotal = min(store.total(for: Date()), dailyTarget)
++                let currentTotal = min(max(store.total(for: Date()), 0), dailyTarget)
 +                ProgressView(value: Double(currentTotal), total: Double(dailyTarget))
                  Text("\(store.total(for: Date())) / \(store.dailyTargetTotal())")
                      .font(.headline)
@@ -58,61 +58,6 @@ index 9959f1247ce337dc20f7cb3bfb876d12d1546c8e..51ca90ded6d8692b4d5bcfbaaac4b08d
                                      editCount = "\(entry.count)"
                                  }
                                  .buttonStyle(.borderless)
-@@ -230,53 +232,51 @@ struct PushManagerView: View {
-                         }
-                     }
-                 }
-             }
-             .onAppear {
-                 editErrorMessage = nil
-             }
-         }
-     }
- 
-     private var insightsSection: some View {
-         SectionCard(title: "Insights") {
-             VStack(alignment: .leading, spacing: 16) {
-                 Picker("Range", selection: $rangeOption) {
-                     ForEach(availableRanges) { option in
-                         Text(option.label).tag(option)
-                     }
-                 }
-                 .pickerStyle(.segmented)
-                 .onChange(of: store.showMonthly) { ensureValidRangeSelection() }
-                 .onChange(of: store.showQuarterly) { ensureValidRangeSelection() }
-                 .onChange(of: store.showYearly) { ensureValidRangeSelection() }
- 
-                 let totals = store.totals(for: rangeOption)
-                 let sum = totals.reduce(0) { $0 + $1.total }
--                let nonRestTotals = totals.filter { !$0.isRestDay }
--                let nonRestSum = nonRestTotals.reduce(0) { $0 + $1.total }
--                let average = nonRestTotals.isEmpty ? 0 : Int(round(Double(nonRestSum) / Double(nonRestTotals.count)))
-+                let average = store.averagePerDay(for: rangeOption)
- 
-                 HStack {
-                     VStack(alignment: .leading) {
-                         Text("Total in range")
-                             .font(.caption)
-                             .foregroundColor(.secondary)
-                         Text("\(sum)")
-                             .font(.title3)
-                             .fontWeight(.semibold)
-                     }
-                     Spacer()
-                     VStack(alignment: .leading) {
-                         Text("Average per day")
-                             .font(.caption)
-                             .foregroundColor(.secondary)
-                         Text("\(average)")
-                             .font(.title3)
-                             .fontWeight(.semibold)
-                     }
-                 }
- 
-                 let chartEntries = store.chartEntries(for: rangeOption)
-                 if rangeOption == .monthly || rangeOption == .quarterly || rangeOption == .yearly {
-                     LineChart(entries: chartEntries)
-                 } else {
  
 EOF
 )

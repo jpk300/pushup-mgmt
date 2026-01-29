@@ -146,7 +146,9 @@ struct PushManagerView: View {
                           .foregroundColor(.secondary)
                   }
 
-                ProgressView(value: Double(store.total(for: Date())), total: Double(max(store.dailyTargetTotal(), 1)))
+                let dailyTarget = max(store.dailyTargetTotal(), 1)
+                let currentTotal = min(max(store.total(for: Date()), 0), dailyTarget)
+                ProgressView(value: Double(currentTotal), total: Double(dailyTarget))
                 Text("\(store.total(for: Date())) / \(store.dailyTargetTotal())")
                     .font(.headline)
 
