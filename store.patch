@@ -1,0 +1,66 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/Store/PushupStore.swift b/Store/PushupStore.swift
+index 3792362b8a417715d08b9c2739457ae155d328e0..9e35a3d2f82e1d9dee5d389f2d5d22f108373602 100644
+--- a/Store/PushupStore.swift
++++ b/Store/PushupStore.swift
+@@ -153,54 +153,55 @@ final class PushupStore: ObservableObject {
+         }
+     }
+     
+     func chartEntries(for range: RangeOption, activity: ActivityType? = nil) -> [ChartEntry] {
+         let activityType = activity ?? selectedActivity
+         switch range {
+         case .daily, .weekly, .monthly:
+             return totals(for: range, activity: activityType).map { entry in
+                 ChartEntry(date: entry.date, value: Double(entry.total))
+             }
+         case .quarterly:
+             return averagedEntries(range: range, bucketSize: 7, activity: activityType)
+         case .yearly:
+             return averagedEntries(range: range, bucketSize: 14, activity: activityType)
+         }
+     }
+     
+     private func averagedEntries(range: RangeOption, bucketSize: Int, activity: ActivityType) -> [ChartEntry] {
+         let dates = range.dates()
+         guard !dates.isEmpty else { return [] }
+         var results: [ChartEntry] = []
+         var index = 0
+         while index < dates.count {
+             let end = min(index + bucketSize, dates.count)
+             let bucket = dates[index..<end]
+-            let sum = bucket.reduce(0) { partial, date in
++            let nonRestDates = bucket.filter { !isRestDay($0, activity: activity) }
++            let sum = nonRestDates.reduce(0) { partial, date in
+                 partial + total(for: date, activity: activity)
+             }
+-            let average = Double(sum) / Double(bucket.count)
++            let average = nonRestDates.isEmpty ? 0 : Double(sum) / Double(nonRestDates.count)
+             if let bucketDate = bucket.last {
+                 results.append(ChartEntry(date: bucketDate, value: average))
+             }
+             index = end
+         }
+         return results
+     }
+     
+     func save() {
+         let payload = StorePayload(
+             selectedActivity: selectedActivity,
+             activitySettings: activitySettings,
+             entries: entries,
+             reminderEnabled: reminderEnabled,
+             reminderTimes: reminderTimes,
+             useIntervalReminders: useIntervalReminders,
+             reminderIntervalHours: reminderIntervalHours,
+             onlyRemindIfBehind: onlyRemindIfBehind,
+             behindThresholdType: behindThresholdType,
+             behindThresholdValue: behindThresholdValue,
+             reminderStartTime: reminderStartTime,
+             quietHoursEnabled: quietHoursEnabled,
+             quietHoursStart: quietHoursStart,
+             quietHoursEnd: quietHoursEnd,
+             showMonthly: showMonthly,
+ 
+EOF
+)

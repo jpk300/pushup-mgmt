@@ -252,7 +252,9 @@ struct PushManagerView: View {
 
                 let totals = store.totals(for: rangeOption)
                 let sum = totals.reduce(0) { $0 + $1.total }
-                let average = totals.isEmpty ? 0 : Int(round(Double(sum) / Double(totals.count)))
+                let nonRestTotals = totals.filter { !$0.isRestDay }
+                let nonRestSum = nonRestTotals.reduce(0) { $0 + $1.total }
+                let average = nonRestTotals.isEmpty ? 0 : Int(round(Double(nonRestSum) / Double(nonRestTotals.count)))
 
                 HStack {
                     VStack(alignment: .leading) {

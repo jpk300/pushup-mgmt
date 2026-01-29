@@ -175,10 +175,11 @@ final class PushupStore: ObservableObject {
         while index < dates.count {
             let end = min(index + bucketSize, dates.count)
             let bucket = dates[index..<end]
-            let sum = bucket.reduce(0) { partial, date in
+            let nonRestDates = bucket.filter { !isRestDay($0, activity: activity) }
+            let sum = nonRestDates.reduce(0) { partial, date in
                 partial + total(for: date, activity: activity)
             }
-            let average = Double(sum) / Double(bucket.count)
+            let average = nonRestDates.isEmpty ? 0 : Double(sum) / Double(nonRestDates.count)
             if let bucketDate = bucket.last {
                 results.append(ChartEntry(date: bucketDate, value: average))
             }

@@ -1,0 +1,63 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/Features/Logging/PushManagerView.swift b/Features/Logging/PushManagerView.swift
+index 5410511b2c5f443fcf90641b201e33c2f7d163a8..9959f1247ce337dc20f7cb3bfb876d12d1546c8e 100644
+--- a/Features/Logging/PushManagerView.swift
++++ b/Features/Logging/PushManagerView.swift
+@@ -230,51 +230,53 @@ struct PushManagerView: View {
+                         }
+                     }
+                 }
+             }
+             .onAppear {
+                 editErrorMessage = nil
+             }
+         }
+     }
+ 
+     private var insightsSection: some View {
+         SectionCard(title: "Insights") {
+             VStack(alignment: .leading, spacing: 16) {
+                 Picker("Range", selection: $rangeOption) {
+                     ForEach(availableRanges) { option in
+                         Text(option.label).tag(option)
+                     }
+                 }
+                 .pickerStyle(.segmented)
+                 .onChange(of: store.showMonthly) { ensureValidRangeSelection() }
+                 .onChange(of: store.showQuarterly) { ensureValidRangeSelection() }
+                 .onChange(of: store.showYearly) { ensureValidRangeSelection() }
+ 
+                 let totals = store.totals(for: rangeOption)
+                 let sum = totals.reduce(0) { $0 + $1.total }
+-                let average = totals.isEmpty ? 0 : Int(round(Double(sum) / Double(totals.count)))
++                let nonRestTotals = totals.filter { !$0.isRestDay }
++                let nonRestSum = nonRestTotals.reduce(0) { $0 + $1.total }
++                let average = nonRestTotals.isEmpty ? 0 : Int(round(Double(nonRestSum) / Double(nonRestTotals.count)))
+ 
+                 HStack {
+                     VStack(alignment: .leading) {
+                         Text("Total in range")
+                             .font(.caption)
+                             .foregroundColor(.secondary)
+                         Text("\(sum)")
+                             .font(.title3)
+                             .fontWeight(.semibold)
+                     }
+                     Spacer()
+                     VStack(alignment: .leading) {
+                         Text("Average per day")
+                             .font(.caption)
+                             .foregroundColor(.secondary)
+                         Text("\(average)")
+                             .font(.title3)
+                             .fontWeight(.semibold)
+                     }
+                 }
+ 
+                 let chartEntries = store.chartEntries(for: rangeOption)
+                 if rangeOption == .monthly || rangeOption == .quarterly || rangeOption == .yearly {
+                     LineChart(entries: chartEntries)
+                 } else {
+ 
+EOF
+)
