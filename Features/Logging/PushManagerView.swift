@@ -34,6 +34,7 @@ struct PushManagerView: View {
                 VStack(spacing: 20) {
                     activitySwitcher
                     heroSection
+                    personalRecordsSection
                     logSection
                     insightsSection
                 }
@@ -92,6 +93,23 @@ struct PushManagerView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var personalRecordsSection: some View {
+        SectionCard(title: "Personal Records") {
+            HStack(spacing: 16) {
+                StatCard(
+                    title: "Best set",
+                    value: "\(store.personalRecordSingleSet())",
+                    subtitle: store.selectedActivity.noun
+                )
+                StatCard(
+                    title: "Best day",
+                    value: "\(store.personalRecordDay())",
+                    subtitle: "\(store.selectedActivity.noun) in a day"
+                )
+            }
+        }
     }
 
     private var logSection: some View {

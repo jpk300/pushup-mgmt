@@ -177,6 +177,20 @@ final class PushupStore: ObservableObject {
             return averagedEntries(range: range, bucketSize: 14, activity: activityType)
         }
     }
+
+    func personalRecordSingleSet(activity: ActivityType? = nil) -> Int {
+        let activityType = activity ?? selectedActivity
+        return entries
+            .filter { $0.activityType == activityType }
+            .map(\.count)
+            .max() ?? 0
+    }
+
+    func personalRecordDay(activity: ActivityType? = nil) -> Int {
+        let activityType = activity ?? selectedActivity
+        let totals = dailyTotalsCache[activityType] ?? [:]
+        return totals.values.max() ?? 0
+    }
     
     private func averagedEntries(range: RangeOption, bucketSize: Int, activity: ActivityType) -> [ChartEntry] {
         let dates = range.dates()

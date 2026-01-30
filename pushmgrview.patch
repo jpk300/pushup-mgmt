@@ -1,63 +1,128 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/Features/Logging/PushManagerView.swift b/Features/Logging/PushManagerView.swift
-index a8a478637c367d0bb47d06ba6c0ccf3a9ca5c4f8..d43f92e0906c9929767b7772f3e9c477f256f4a0 100644
+index d43f92e0906c9929767b7772f3e9c477f256f4a0..984e4ae97eba4dfdb8eef71f7f87d150bf8b99df 100644
 --- a/Features/Logging/PushManagerView.swift
 +++ b/Features/Logging/PushManagerView.swift
-@@ -124,51 +124,53 @@ struct PushManagerView: View {
-                     Button("Add set") {
-                         guard let count = Int(logCount), count > 0 else {
-                             logErrorMessage = "Enter a number greater than zero."
-                             return
+@@ -12,50 +12,51 @@ struct PushManagerView: View {
+     @EnvironmentObject private var store: PushupStore
+     @State private var logCount: String = ""
+     @State private var logErrorMessage: String?
+     @State private var rangeOption: RangeOption = .weekly
+     @State private var editingEntry: PushupEntry?
+     @State private var editCount: String = ""
+     @State private var editErrorMessage: String?
+     @State private var showGoalCelebration: Bool = false
+     @State private var lastTrackedDay: Date = Calendar.current.startOfDay(for: Date())
+     @State private var lastTrackedTotal: Int = 0
+     @FocusState private var isLogFieldFocused: Bool
+     private var availableRanges: [RangeOption] {
+         var ranges: [RangeOption] = [.daily, .weekly]
+         if store.showMonthly { ranges.append(.monthly) }
+         if store.showQuarterly { ranges.append(.quarterly) }
+         if store.showYearly { ranges.append(.yearly) }
+         return ranges
+     }
+ 
+     var body: some View {
+         NavigationStack {
+             ScrollView {
+                 VStack(spacing: 20) {
+                     activitySwitcher
+                     heroSection
++                    personalRecordsSection
+                     logSection
+                     insightsSection
+                 }
+                 .padding()
+             }
+             .navigationTitle("\(store.selectedActivity.title) Tracker")
+             .toolbar {
+                 ToolbarItem(placement: .navigationBarTrailing) {
+                     NavigationLink("Settings") {
+                         AdminView()
+                             .environmentObject(store)
+                     }
+                     .foregroundColor(.blue)
+                 }
+             }
+         }
+         .onAppear {
+             lastTrackedDay = Calendar.current.startOfDay(for: Date())
+             lastTrackedTotal = store.total(for: Date())
+         }
+         .onChange(of: store.selectedActivity) {
+             lastTrackedDay = Calendar.current.startOfDay(for: Date())
+             lastTrackedTotal = store.total(for: Date())
+             logCount = ""
+             logErrorMessage = nil
+@@ -72,50 +73,67 @@ struct PushManagerView: View {
+ 
+     private var activitySwitcher: some View {
+         SectionCard(title: "Activity") {
+             Picker("Activity", selection: $store.selectedActivity) {
+                 ForEach(ActivityType.allCases) { activity in
+                     Text(activity.title).tag(activity)
+                 }
+             }
+             .pickerStyle(.segmented)
+         }
+     }
+ 
+     private var heroSection: some View {
+         VStack(alignment: .leading, spacing: 12) {
+             Text("Stay on track with daily \(store.selectedActivity.noun).")
+                 .font(.title2)
+                 .fontWeight(.semibold)
+             HStack(spacing: 16) {
+                 StatCard(title: "Today", value: "\(store.total(for: Date()))", subtitle: "Target: \(store.dailyTargetTotal())")
+                 StatCard(title: "Streak", value: "\(store.streak())", subtitle: "days hit target")
+             }
+         }
+         .frame(maxWidth: .infinity, alignment: .leading)
+     }
+ 
++    private var personalRecordsSection: some View {
++        SectionCard(title: "Personal Records") {
++            HStack(spacing: 16) {
++                StatCard(
++                    title: "Best set",
++                    value: "\(store.personalRecordSingleSet())",
++                    subtitle: store.selectedActivity.noun
++                )
++                StatCard(
++                    title: "Best day",
++                    value: "\(store.personalRecordDay())",
++                    subtitle: "\(store.selectedActivity.noun) in a day"
++                )
++            }
++        }
++    }
++
+     private var logSection: some View {
+         SectionCard(title: "Log \(store.selectedActivity.noun)") {
+             VStack(alignment: .leading, spacing: 16) {
+                 let isRestDayToday = store.isRestDay(Date())
+                 HStack {
+                     if store.selectedActivity == .pushups {
+                         NavigationLink("Log with camera") {
+                             CameraView()
+                                 .environmentObject(store)
                          }
-                         store.addEntry(count: count)
-                         logCount = ""
-                         logErrorMessage = nil
-                         isLogFieldFocused = false
+                         .buttonStyle(.borderedProminent)
+                     }
+                     
+                     Button(isRestDayToday ? "Cancel rest day" : "Rest day") {
+                         store.setRestDay(Date(), isRestDay: !isRestDayToday)
                      }
                      .buttonStyle(.borderedProminent)
                  }
-                 .disabled(isRestDayToday)
-                 if let logErrorMessage {
-                     Text(logErrorMessage)
-                         .font(.caption)
-                         .foregroundColor(.red)
-                 }
  
-                 if isRestDayToday {
-                       Text("Rest day selected. \(store.selectedActivity.title) are optional.")
-                           .font(.caption)
-                           .foregroundColor(.secondary)
-                   }
- 
--                ProgressView(value: Double(store.total(for: Date())), total: Double(max(store.dailyTargetTotal(), 1)))
-+                let dailyTarget = max(store.dailyTargetTotal(), 1)
-+                let currentTotal = min(max(store.total(for: Date()), 0), dailyTarget)
-+                ProgressView(value: Double(currentTotal), total: Double(dailyTarget))
-                 Text("\(store.total(for: Date())) / \(store.dailyTargetTotal())")
-                     .font(.headline)
- 
-                 VStack(alignment: .leading, spacing: 8) {
-                     Text("Today")
-                         .font(.subheadline)
-                         .foregroundColor(.secondary)
-                     let todaysEntries = store.entries.filter {
-                         $0.activityType == store.selectedActivity && Calendar.current.isDateInToday($0.timestamp)
-                     }
-                     if todaysEntries.isEmpty {
-                         Text(isRestDayToday ? "Rest day logged." : "No sets logged yet today.")
-                             .foregroundColor(.secondary)
-                     } else {
-                         ForEach(todaysEntries.reversed()) { entry in
-                             HStack {
-                                 Text("\(entry.count) \(store.selectedActivity.noun)")
-                                 Spacer()
-                                 Text(entry.timestamp, style: .time)
-                                     .foregroundColor(.secondary)
-                                 Button("Edit") {
-                                     editingEntry = entry
-                                     editCount = "\(entry.count)"
-                                 }
-                                 .buttonStyle(.borderless)
+                 HStack {
+                     TextField("\(store.selectedActivity.title) completed", text: $logCount)
+                         .keyboardType(.numberPad)
+                         .textFieldStyle(.roundedBorder)
+                         .focused($isLogFieldFocused)
+                         .onChange(of: logCount) {
  
 EOF
 )

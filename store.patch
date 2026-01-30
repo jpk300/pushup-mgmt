@@ -1,45 +1,20 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/Store/PushupStore.swift b/Store/PushupStore.swift
-index 9e35a3d2f82e1d9dee5d389f2d5d22f108373602..94747f625ccddedfc8e3a1c0778d1836ac7aac84 100644
+index 94747f625ccddedfc8e3a1c0778d1836ac7aac84..86b5b753f9ef8bd232a5700500a39830c1f36995 100644
 --- a/Store/PushupStore.swift
 +++ b/Store/PushupStore.swift
-@@ -130,50 +130,61 @@ final class PushupStore: ObservableObject {
-         let settings = settings(for: activityType)
-         let restDays = Set(settings.restDays.map { Calendar.current.startOfDay(for: $0) })
-         return restDays.contains(Calendar.current.startOfDay(for: date))
-     }
+@@ -155,50 +155,64 @@ final class PushupStore: ObservableObject {
  
-     func setRestDay(_ date: Date, isRestDay: Bool, activity: ActivityType? = nil) {
+     func averagePerDay(for range: RangeOption, activity: ActivityType? = nil) -> Int {
          let activityType = activity ?? selectedActivity
-         let day = Calendar.current.startOfDay(for: date)
-         updateSettings(for: activityType) { settings in
-             var restDays = Set(settings.restDays.map { Calendar.current.startOfDay(for: $0) })
-             if isRestDay {
-                 restDays.insert(day)
-             } else {
-                 restDays.remove(day)
-             }
-             settings.restDays = Array(restDays)
+         let dates = range.dates()
+         let nonRestDates = dates.filter { !isRestDay($0, activity: activityType) }
+         let sum = nonRestDates.reduce(0) { partial, date in
+             partial + total(for: date, activity: activityType)
          }
+         guard !nonRestDates.isEmpty else { return 0 }
+         return Int(round(Double(sum) / Double(nonRestDates.count)))
      }
- 
-     func totals(for range: RangeOption, activity: ActivityType? = nil) -> [RangeEntry] {
-         let activityType = activity ?? selectedActivity
-         return range.dates().map { date in
-             RangeEntry(date: date, total: total(for: date, activity: activityType), isRestDay: isRestDay(date, activity: activityType))
-         }
-     }
-+
-+    func averagePerDay(for range: RangeOption, activity: ActivityType? = nil) -> Int {
-+        let activityType = activity ?? selectedActivity
-+        let dates = range.dates()
-+        let nonRestDates = dates.filter { !isRestDay($0, activity: activityType) }
-+        let sum = nonRestDates.reduce(0) { partial, date in
-+            partial + total(for: date, activity: activityType)
-+        }
-+        guard !nonRestDates.isEmpty else { return 0 }
-+        return Int(round(Double(sum) / Double(nonRestDates.count)))
-+    }
      
      func chartEntries(for range: RangeOption, activity: ActivityType? = nil) -> [ChartEntry] {
          let activityType = activity ?? selectedActivity
@@ -54,6 +29,20 @@ index 9e35a3d2f82e1d9dee5d389f2d5d22f108373602..94747f625ccddedfc8e3a1c0778d1836
              return averagedEntries(range: range, bucketSize: 14, activity: activityType)
          }
      }
++
++    func personalRecordSingleSet(activity: ActivityType? = nil) -> Int {
++        let activityType = activity ?? selectedActivity
++        return entries
++            .filter { $0.activityType == activityType }
++            .map(\.count)
++            .max() ?? 0
++    }
++
++    func personalRecordDay(activity: ActivityType? = nil) -> Int {
++        let activityType = activity ?? selectedActivity
++        let totals = dailyTotalsCache[activityType] ?? [:]
++        return totals.values.max() ?? 0
++    }
      
      private func averagedEntries(range: RangeOption, bucketSize: Int, activity: ActivityType) -> [ChartEntry] {
          let dates = range.dates()
@@ -65,6 +54,20 @@ index 9e35a3d2f82e1d9dee5d389f2d5d22f108373602..94747f625ccddedfc8e3a1c0778d1836
              let bucket = dates[index..<end]
              let nonRestDates = bucket.filter { !isRestDay($0, activity: activity) }
              let sum = nonRestDates.reduce(0) { partial, date in
+                 partial + total(for: date, activity: activity)
+             }
+             let average = nonRestDates.isEmpty ? 0 : Double(sum) / Double(nonRestDates.count)
+             if let bucketDate = bucket.last {
+                 results.append(ChartEntry(date: bucketDate, value: average))
+             }
+             index = end
+         }
+         return results
+     }
+     
+     func save() {
+         let payload = StorePayload(
+             selectedActivity: selectedActivity,
  
 EOF
 )
